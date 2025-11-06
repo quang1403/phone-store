@@ -1,0 +1,29 @@
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  padding-top: 2rem;
+}
+.logo {
+  font-weight: bold;
+  font-size: 22px;
+  text-align: center;
+  margin-bottom: 2rem;
+}
+.menu {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+.menuItem {
+  padding: 1rem;
+  border-radius: 0.7rem;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+.menuItem.active {
+  background: #ffe1bc;
+}
+.menuItem:last-child {
+  margin-top: 2rem;
+  color: #f00;
+}

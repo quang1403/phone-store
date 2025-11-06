@@ -1,0 +1,41 @@
+# === GLOBAL IGNORE ===
+node_modules/
+build/
+dist/
+.DS_Store
+Thumbs.db
+logs/
+*.log
+
+# === ENVIRONMENT ===
+.env
+.env.*
+*.env.local
+*.env.development.local
+*.env.production.local
+
+# === UPLOADS ===
+uploads/
+public/uploads/
+public/images/
+
+# === IDE & SYSTEM ===
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+Desktop.ini
+
+# === FRONTEND (React) ===
+client/node_modules/
+client/build/
+client/.env
+client/.DS_Store
+
+# === BACKEND (Node.js) ===
+server/node_modules/
+server/dist/
+server/.env
+server/.DS_Store
