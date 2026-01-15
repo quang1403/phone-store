@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import * as XLSX from "xlsx";
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -76,9 +77,18 @@ const Statistics = () => {
         break;
 
       case "month":
-        startDate = new Date(now.getFullYear(), now.getMonth(), 1);
-        endDate = new Date(now.getFullYear(), now.getMonth() + 1, 1);
-        groupBy = "week";
+        // Lấy từ đầu năm đến CUỐI THÁNG HIỆN TẠI
+        startDate = new Date(now.getFullYear(), 0, 1); // 1/1 năm hiện tại
+        // Lấy đến hết ngày cuối tháng hiện tại
+        endDate = new Date(
+          now.getFullYear(),
+          now.getMonth() + 1,
+          0,
+          23,
+          59,
+          59
+        );
+        groupBy = "month";
         break;
 
       case "quarter":
@@ -107,7 +117,6 @@ const Statistics = () => {
       groupBy,
     };
 
-    console.log("📅 Analytics params for timeFilter:", timeFilter, params);
     return params;
   };
 
@@ -115,7 +124,7 @@ const Statistics = () => {
   const calculateStatsFromAnalytics = async (analyticsParams) => {
     try {
       console.log(
-        "📊 Calculating stats from backend analytics APIs:",
+        " Calculating stats from backend analytics APIs:",
         analyticsParams
       );
 
@@ -126,15 +135,15 @@ const Statistics = () => {
         productAnalyticsResponse,
       ] = await Promise.all([
         getRevenueAnalytics(analyticsParams).catch((err) => {
-          console.error("❌ getRevenueAnalytics error:", err);
+          console.error(" getRevenueAnalytics error:", err);
           return { data: null };
         }),
         getCustomerAnalytics(analyticsParams).catch((err) => {
-          console.error("❌ getCustomerAnalytics error:", err);
+          console.error(" getCustomerAnalytics error:", err);
           return { data: null };
         }),
         getProductAnalytics(analyticsParams).catch((err) => {
-          console.error("❌ getProductAnalytics error:", err);
+          console.error(" getProductAnalytics error:", err);
           return { data: null };
         }),
       ]);
@@ -179,13 +188,6 @@ const Statistics = () => {
       ordersByStatus[2].count =
         remainingOrders - ordersByStatus[0].count - ordersByStatus[1].count;
 
-      console.log("📊 Calculated stats from analytics APIs:", {
-        totalOrders,
-        totalRevenue,
-        totalUsers,
-        ordersByStatus,
-      });
-
       return {
         totalOrders,
         totalRevenue,
@@ -196,7 +198,7 @@ const Statistics = () => {
         productAnalytics: productAnalyticsResponse.data,
       };
     } catch (error) {
-      console.error("🚨 Error calculating stats from analytics APIs:", error);
+      console.error(" Error calculating stats from analytics APIs:", error);
       return {
         totalOrders: 0,
         totalRevenue: 0,
@@ -371,11 +373,6 @@ const Statistics = () => {
       setLoading(false);
       return;
     }
-
-    console.log(
-      "🔑 Token found, fetching statistics with timeFilter:",
-      timeFilter
-    );
     setLoading(true);
 
     try {
@@ -405,6 +402,9 @@ const Statistics = () => {
           analyticsResults.revenueAnalytics,
           analyticsParams.groupBy
         );
+      } else {
+        // Nếu không có data từ analytics, vẫn set empty data với structure đúng
+        processRevenueDataFromAnalytics([], analyticsParams.groupBy);
       }
 
       // Cập nhật customer behavior data
@@ -452,6 +452,34 @@ const Statistics = () => {
 
   // Xử lý dữ liệu revenue analytics từ backend cho charts
   const processRevenueDataFromAnalytics = (revenueAnalytics, groupBy) => {
+    const now = new Date();
+    const currentYear = now.getFullYear();
+    const currentMonth = now.getMonth() + 1; // 1-12
+
+    // Nếu groupBy là month, chỉ tạo các tháng từ đầu năm đến tháng hiện tại
+    if (groupBy === "month") {
+      const result = [];
+
+      // Chỉ tạo các tháng từ đầu năm đến tháng hiện tại
+      for (let i = 1; i <= currentMonth; i++) {
+        // Tìm dữ liệu cho tháng này
+        const monthData = revenueAnalytics.find(
+          (item) =>
+            item._id && item._id.year === currentYear && item._id.month === i
+        );
+
+        result.push({
+          month: `Tháng ${i}`,
+          revenue: monthData?.totalRevenue || 0,
+          orderCount: monthData?.orderCount || 0,
+        });
+      }
+
+      setRevenueData(result);
+      return;
+    }
+
+    // Xử lý các groupBy khác (day, week, quarter, year)
     if (!Array.isArray(revenueAnalytics) || revenueAnalytics.length === 0) {
       setRevenueData([]);
       return;
@@ -499,7 +527,6 @@ const Statistics = () => {
       };
     });
 
-    console.log("📊 Processed revenue data for charts:", processedData);
     setRevenueData(processedData);
   };
 
@@ -507,8 +534,6 @@ const Statistics = () => {
   const fetchTrendAnalytics = async () => {
     try {
       const trendsResponse = await getTrendAnalytics({ months: 6 });
-      console.log("📊 Trends API response:", trendsResponse.data);
-
       if (trendsResponse.data) {
         // Trạng thái đơn hàng theo tháng
         if (Array.isArray(trendsResponse.data.orderStatusTrend)) {
@@ -575,12 +600,6 @@ const Statistics = () => {
       { method: "banking", count: Math.floor(users.length * 0.15) },
     ];
 
-    console.log("📊 Created fallback customer analytics:", {
-      topCustomers,
-      customerFrequency,
-      paymentMethodStats,
-    });
-
     return {
       topCustomers,
       customerFrequency,
@@ -608,7 +627,6 @@ const Statistics = () => {
       });
     }
 
-    console.log("🔄 Converted dashboard data to orders format:", orders);
     return orders;
   };
 
@@ -652,8 +670,6 @@ const Statistics = () => {
   };
 
   const processOrderStatusData = (orders) => {
-    console.log("🔍 Processing order status data:", orders);
-
     const statusCounts = {};
     const statusLabels = {
       pending: "Chờ xử lý",
@@ -705,12 +721,9 @@ const Statistics = () => {
       });
     } else {
       // Chỉ tạo sample data nếu thực sự không có dữ liệu đơn hàng nào
-      console.log("⚠️ No orders data available, using minimal sample data");
       statusCounts["pending"] = 1;
       statusCounts["delivered"] = 1;
     }
-
-    console.log("📊 Status counts:", statusCounts);
 
     // Chỉ hiển thị những trạng thái có đơn hàng
     const validStatuses = allStatuses.filter(
@@ -860,6 +873,314 @@ const Statistics = () => {
     }).format(amount || 0);
   };
 
+  // Hàm xuất báo cáo Excel - TOÀN BỘ TRANG
+  const exportToExcel = () => {
+    try {
+      // Tạo workbook mới
+      const wb = XLSX.utils.book_new();
+
+      // Sheet 1: Tổng quan
+      const overviewData = [
+        ["BÁO CÁO THỐNG KÊ TỔNG QUAN - TOÀN BỘ DỮ LIỆU"],
+        ["Ngày xuất:", new Date().toLocaleString("vi-VN")],
+        [
+          "Bộ lọc:",
+          timeFilter === "today"
+            ? "Hôm nay"
+            : timeFilter === "week"
+            ? "Tuần này"
+            : timeFilter === "month"
+            ? "Tháng này"
+            : timeFilter === "quarter"
+            ? "Quý này"
+            : "Năm này",
+        ],
+        [],
+        ["CHỈ SỐ TỔNG QUAN"],
+        ["Tổng doanh thu", stats.totalRevenue],
+        ["Tổng đơn hàng", stats.totalOrders],
+        ["Tổng khách hàng", stats.totalUsers],
+        ["Tổng sản phẩm", stats.totalProducts],
+      ];
+      const ws1 = XLSX.utils.aoa_to_sheet(overviewData);
+      XLSX.utils.book_append_sheet(wb, ws1, "1. Tổng quan");
+
+      // Sheet 2: Doanh thu theo tháng
+      if (revenueData && revenueData.length > 0) {
+        const revenueSheetData = [
+          ["DOANH THU THEO THÁNG"],
+          [],
+          ["Tháng", "Doanh thu (VND)", "Số đơn hàng"],
+          ...revenueData.map((item) => [
+            item.month,
+            item.revenue,
+            item.orderCount,
+          ]),
+          [],
+          [
+            "TỔNG CỘNG",
+            revenueData.reduce((sum, item) => sum + item.revenue, 0),
+            revenueData.reduce((sum, item) => sum + item.orderCount, 0),
+          ],
+        ];
+        const ws2 = XLSX.utils.aoa_to_sheet(revenueSheetData);
+        XLSX.utils.book_append_sheet(wb, ws2, "2. Doanh thu");
+      }
+
+      // Sheet 3: Trạng thái đơn hàng theo tháng
+      if (orderStatusTrendData && orderStatusTrendData.labels) {
+        const statusTrendData = [
+          ["TRẠNG THÁI ĐỠN HÀNG THEO THÁNG"],
+          [],
+          ["Tháng", ...orderStatusTrendData.datasets.map((d) => d.label)],
+        ];
+
+        orderStatusTrendData.labels.forEach((label, idx) => {
+          const row = [label];
+          orderStatusTrendData.datasets.forEach((dataset) => {
+            row.push(dataset.data[idx] || 0);
+          });
+          statusTrendData.push(row);
+        });
+
+        const ws3 = XLSX.utils.aoa_to_sheet(statusTrendData);
+        XLSX.utils.book_append_sheet(wb, ws3, "3. Trạng thái đơn hàng");
+      }
+
+      // Sheet 4: Tất cả sản phẩm bán chạy
+      if (productAnalytics && productAnalytics.length > 0) {
+        const productSheetData = [
+          ["TẤT CẢ SẢN PHẨM BÁN CHẠY"],
+          [],
+          [
+            "STT",
+            "Tên sản phẩm",
+            "Thương hiệu",
+            "Đã bán",
+            "Doanh thu (VND)",
+            "Giá (VND)",
+            "Tồn kho",
+            "Đánh giá",
+            "Nổi bật",
+          ],
+          ...productAnalytics.map((product, index) => [
+            index + 1,
+            product.name || product.productName,
+            product.brand || "N/A",
+            product.totalSold || product.sold || 0,
+            product.totalRevenue || 0,
+            product.price || 0,
+            product.stock || 0,
+            product.rating || 0,
+            product.featured ? "Có" : "Không",
+          ]),
+          [],
+          [
+            "TỔNG CỘNG",
+            "",
+            "",
+            productAnalytics.reduce(
+              (sum, p) => sum + (p.totalSold || p.sold || 0),
+              0
+            ),
+            productAnalytics.reduce((sum, p) => sum + (p.totalRevenue || 0), 0),
+          ],
+        ];
+        const ws4 = XLSX.utils.aoa_to_sheet(productSheetData);
+        XLSX.utils.book_append_sheet(wb, ws4, "4. Sản phẩm");
+      }
+
+      // Sheet 5: Người dùng mới đăng ký
+      if (newUserTrendData && newUserTrendData.labels) {
+        const userTrendSheetData = [
+          ["NGƯỜI DÙNG MỚI ĐĂNG KÝ THEO THÁNG"],
+          [],
+          ["Tháng", "Số người dùng mới"],
+          ...newUserTrendData.labels.map((label, idx) => [
+            label,
+            newUserTrendData.datasets[0].data[idx],
+          ]),
+          [],
+          [
+            "TỔNG",
+            newUserTrendData.datasets[0].data.reduce(
+              (sum, val) => sum + val,
+              0
+            ),
+          ],
+        ];
+        const ws5 = XLSX.utils.aoa_to_sheet(userTrendSheetData);
+        XLSX.utils.book_append_sheet(wb, ws5, "5. Người dùng mới");
+      }
+
+      // Sheet 6: Tỷ lệ hoàn thành đơn hàng
+      if (orderCompletionRateData && orderCompletionRateData.labels) {
+        const completionRateSheetData = [
+          ["TỶ LỆ HOÀN THÀNH ĐƠN HÀNG THEO THÁNG"],
+          [],
+          ["Tháng", "Tỷ lệ hoàn thành (%)"],
+          ...orderCompletionRateData.labels.map((label, idx) => [
+            label,
+            orderCompletionRateData.datasets[0].data[idx],
+          ]),
+          [],
+          [
+            "Trung bình",
+            (
+              orderCompletionRateData.datasets[0].data.reduce(
+                (sum, val) => sum + parseFloat(val),
+                0
+              ) / orderCompletionRateData.datasets[0].data.length
+            ).toFixed(2),
+          ],
+        ];
+        const ws6 = XLSX.utils.aoa_to_sheet(completionRateSheetData);
+        XLSX.utils.book_append_sheet(wb, ws6, "6. Tỷ lệ hoàn thành");
+      }
+
+      // Sheet 7: Top khách hàng VIP
+      if (
+        customerBehavior &&
+        customerBehavior.topCustomers &&
+        customerBehavior.topCustomers.length > 0
+      ) {
+        const customerSheetData = [
+          ["TOP KHÁCH HÀNG VIP"],
+          [],
+          [
+            "Hạng",
+            "Tên khách hàng",
+            "Email",
+            "Số điện thoại",
+            "Số đơn hàng",
+            "Tổng chi tiêu (VND)",
+            "Giá trị đơn TB (VND)",
+          ],
+          ...customerBehavior.topCustomers.map((customer, index) => [
+            index + 1,
+            customer.customer?.fullName || "Khách hàng ẩn danh",
+            customer.customer?.email || "N/A",
+            customer.customer?.phone || "N/A",
+            customer.orderCount,
+            customer.totalSpent,
+            customer.avgOrderValue,
+          ]),
+          [],
+          [
+            "TỔNG",
+            "",
+            "",
+            "",
+            customerBehavior.topCustomers.reduce(
+              (sum, c) => sum + c.orderCount,
+              0
+            ),
+            customerBehavior.topCustomers.reduce(
+              (sum, c) => sum + c.totalSpent,
+              0
+            ),
+          ],
+        ];
+        const ws7 = XLSX.utils.aoa_to_sheet(customerSheetData);
+        XLSX.utils.book_append_sheet(wb, ws7, "7. Top khách hàng");
+      }
+
+      // Sheet 8: Tần suất mua hàng
+      if (
+        customerBehavior &&
+        customerBehavior.customerFrequency &&
+        customerBehavior.customerFrequency.length > 0
+      ) {
+        const totalCustomers = customerBehavior.customerFrequency.reduce(
+          (sum, item) => sum + item.customerCount,
+          0
+        );
+        const frequencySheetData = [
+          ["TẦN SUẤT MUA HÀNG KHÁCH HÀNG"],
+          [],
+          ["Số lần mua", "Số lượng khách hàng", "Tỷ lệ (%)"],
+          ...customerBehavior.customerFrequency.map((freq) => [
+            freq._id + " lần",
+            freq.customerCount,
+            ((freq.customerCount / totalCustomers) * 100).toFixed(2),
+          ]),
+          [],
+          ["TỔNG", totalCustomers, "100.00"],
+        ];
+        const ws8 = XLSX.utils.aoa_to_sheet(frequencySheetData);
+        XLSX.utils.book_append_sheet(wb, ws8, "8. Tần suất mua hàng");
+      }
+
+      // Sheet 9: Phương thức thanh toán
+      if (
+        customerBehavior &&
+        customerBehavior.paymentMethodStats &&
+        customerBehavior.paymentMethodStats.length > 0
+      ) {
+        const totalOrders = customerBehavior.paymentMethodStats.reduce(
+          (sum, item) => sum + item.count,
+          0
+        );
+        const paymentSheetData = [
+          ["PHƯƠNG THỨC THANH TOÁN"],
+          [],
+          [
+            "Phương thức",
+            "Số đơn hàng",
+            "Tổng doanh thu (VND)",
+            "Giá trị TB (VND)",
+            "Tỷ lệ sử dụng (%)",
+          ],
+          ...customerBehavior.paymentMethodStats.map((pm) => {
+            const methodName =
+              pm._id === "cod"
+                ? "Thanh toán khi nhận hàng (COD)"
+                : pm._id === "vnpay"
+                ? "VNPay"
+                : pm._id === "momo"
+                ? "MoMo"
+                : pm._id === "banking"
+                ? "Chuyển khoản ngân hàng"
+                : pm._id;
+            return [
+              methodName,
+              pm.count,
+              pm.totalRevenue || 0,
+              pm.avgValue || 0,
+              ((pm.count / totalOrders) * 100).toFixed(2),
+            ];
+          }),
+          [],
+          [
+            "TỔNG",
+            totalOrders,
+            customerBehavior.paymentMethodStats.reduce(
+              (sum, pm) => sum + (pm.totalRevenue || 0),
+              0
+            ),
+            "",
+            "100.00",
+          ],
+        ];
+        const ws9 = XLSX.utils.aoa_to_sheet(paymentSheetData);
+        XLSX.utils.book_append_sheet(wb, ws9, "9. Phương thức TT");
+      }
+
+      // Xuất file
+      const fileName = `Bao-cao-toan-bo_${timeFilter}_${
+        new Date().toISOString().split("T")[0]
+      }.xlsx`;
+      XLSX.writeFile(wb, fileName);
+
+      alert(
+        "Xuất báo cáo toàn bộ thành công!\n\nFile bao gồm 9 sheet dữ liệu chi tiết."
+      );
+    } catch (error) {
+      console.error("Lỗi khi xuất báo cáo:", error);
+      alert("Có lỗi xảy ra khi xuất báo cáo. Vui lòng thử lại!");
+    }
+  };
+
   const revenueChartData = {
     labels: revenueData.map((item) => item.month),
     datasets: [
@@ -890,11 +1211,21 @@ const Statistics = () => {
         <h1>📊 Thống kê & Báo cáo</h1>
         <div className="time-filter">
           <button
-            onClick={fetchStatisticsData}
-            className="refresh-btn"
-            title="Làm mới dữ liệu"
+            onClick={exportToExcel}
+            className="export-btn"
+            title="Xuất báo cáo Excel"
+            style={{
+              backgroundColor: "#10b981",
+              color: "white",
+              padding: "8px 16px",
+              border: "none",
+              borderRadius: "6px",
+              cursor: "pointer",
+              marginRight: "10px",
+              fontWeight: "500",
+            }}
           >
-            🔄 Làm mới
+            📥 Xuất báo cáo
           </button>
           <select
             value={timeFilter}
@@ -917,14 +1248,6 @@ const Statistics = () => {
           <div className="kpi-content">
             <h3>Tổng doanh thu</h3>
             <p className="kpi-value">{formatCurrency(stats.totalRevenue)}</p>
-            <span
-              className={`kpi-growth ${
-                monthlyGrowth.revenue >= 0 ? "positive" : "negative"
-              }`}
-            >
-              {monthlyGrowth.revenue >= 0 ? "↗" : "↘"}{" "}
-              {Math.abs(monthlyGrowth.revenue)}%
-            </span>
           </div>
         </div>
 
@@ -933,14 +1256,6 @@ const Statistics = () => {
           <div className="kpi-content">
             <h3>Đơn hàng</h3>
             <p className="kpi-value">{stats.totalOrders}</p>
-            <span
-              className={`kpi-growth ${
-                monthlyGrowth.orders >= 0 ? "positive" : "negative"
-              }`}
-            >
-              {monthlyGrowth.orders >= 0 ? "↗" : "↘"}{" "}
-              {Math.abs(monthlyGrowth.orders)}%
-            </span>
           </div>
         </div>
 
@@ -949,14 +1264,6 @@ const Statistics = () => {
           <div className="kpi-content">
             <h3>Khách hàng</h3>
             <p className="kpi-value">{stats.totalUsers}</p>
-            <span
-              className={`kpi-growth ${
-                monthlyGrowth.customers >= 0 ? "positive" : "negative"
-              }`}
-            >
-              {monthlyGrowth.customers >= 0 ? "↗" : "↘"}{" "}
-              {Math.abs(monthlyGrowth.customers)}%
-            </span>
           </div>
         </div>
 
@@ -965,7 +1272,6 @@ const Statistics = () => {
           <div className="kpi-content">
             <h3>Sản phẩm</h3>
             <p className="kpi-value">{stats.totalProducts}</p>
-            <span className="kpi-growth neutral">— 0%</span>
           </div>
         </div>
       </div>
@@ -984,6 +1290,14 @@ const Statistics = () => {
                 options={{
                   responsive: true,
                   maintainAspectRatio: false,
+                  layout: {
+                    padding: {
+                      left: 10,
+                      right: 10,
+                      top: 20,
+                      bottom: 10,
+                    },
+                  },
                   plugins: {
                     legend: { display: false },
                     tooltip: {
@@ -994,10 +1308,22 @@ const Statistics = () => {
                     },
                   },
                   scales: {
+                    x: {
+                      display: true,
+                      ticks: {
+                        autoSkip: false,
+                        maxRotation: 45,
+                        minRotation: 0,
+                      },
+                    },
                     y: {
                       beginAtZero: true,
+                      min: 0,
                       ticks: {
                         callback: (value) => formatCurrency(value || 0),
+                      },
+                      grid: {
+                        display: true,
                       },
                     },
                   },
@@ -1006,72 +1332,6 @@ const Statistics = () => {
             ) : (
               <div className="no-data">
                 {loading ? "Đang tải..." : "Không có dữ liệu doanh thu"}
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Biểu đồ trạng thái đơn hàng */}
-        <div className="chart-card order-status-chart">
-          <div className="chart-header">
-            <h3>📊 Trạng thái đơn hàng</h3>
-          </div>
-          <div className="chart-content">
-            {orderStatusData &&
-            orderStatusData.labels &&
-            Array.isArray(orderStatusData.labels) &&
-            orderStatusData.labels.length > 0 &&
-            orderStatusData.datasets &&
-            Array.isArray(orderStatusData.datasets) &&
-            orderStatusData.datasets.length > 0 ? (
-              <Doughnut
-                data={orderStatusData}
-                options={{
-                  responsive: true,
-                  maintainAspectRatio: false,
-                  plugins: {
-                    legend: {
-                      position: "bottom",
-                      labels: {
-                        padding: 20,
-                        usePointStyle: true,
-                      },
-                    },
-                    tooltip: {
-                      callbacks: {
-                        label: (context) => {
-                          const total = context.dataset.data.reduce(
-                            (a, b) => a + b,
-                            0
-                          );
-                          const percentage = (
-                            (context.parsed / total) *
-                            100
-                          ).toFixed(1);
-                          return `${context.label}: ${context.parsed} đơn (${percentage}%)`;
-                        },
-                      },
-                    },
-                  },
-                  animation: {
-                    animateRotate: true,
-                    duration: 1000,
-                  },
-                }}
-              />
-            ) : (
-              <div className="no-data">
-                {loading ? (
-                  <div className="loading-spinner">
-                    <div className="spinner"></div>
-                    <p>Đang tải dữ liệu...</p>
-                  </div>
-                ) : (
-                  <div className="empty-state">
-                    <p>📋 Chưa có đơn hàng nào</p>
-                    <small>Dữ liệu sẽ hiển thị khi có đơn hàng mới</small>
-                  </div>
-                )}
               </div>
             )}
           </div>
@@ -1174,7 +1434,7 @@ const Statistics = () => {
                           <strong>Giá bán:</strong>{" "}
                           {formatCurrency(item.price || 0)}
                         </div>
-                        
+
                         {item.rating && (
                           <div className="mb-1">
                             <strong>Đánh giá:</strong> ⭐{" "}

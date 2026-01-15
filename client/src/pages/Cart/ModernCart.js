@@ -122,6 +122,17 @@ const ModernCart = () => {
     return item.quantity * (item.variant?.price || item.price || 0);
   };
 
+  const handleInstallment = (item) => {
+    // Chuyển đến trang trả góp với sản phẩm đã chọn
+    navigate(`/installment/${item.productId._id}`, {
+      state: {
+        variant: item.variant,
+        quantity: item.quantity,
+        fromCart: true,
+      },
+    });
+  };
+
   if (loading) {
     return (
       <div className="cart-container">
@@ -202,11 +213,7 @@ const ModernCart = () => {
                             Bộ nhớ: {item.variant.storage}
                           </span>
                         )}
-                        {item.variant?.condition && (
-                          <span className="spec">
-                            Tình trạng: {item.variant.condition}
-                          </span>
-                        )}
+                        
                       </div>
                       <div className="item-price">
                         <span className="price">
@@ -229,18 +236,28 @@ const ModernCart = () => {
                       <div className="total-price">
                         {calculateItemTotal(item).toLocaleString("vi-VN")}₫
                       </div>
-                      <button
-                        className="remove-btn"
-                        onClick={() => handleRemoveItem(item._id)}
-                        disabled={updating[item._id]}
-                        title="Xóa sản phẩm"
-                      >
-                        {updating[item._id] ? (
-                          <i className="fas fa-spinner fa-spin"></i>
-                        ) : (
-                          <i className="fas fa-trash"></i>
-                        )}
-                      </button>
+                      <div className="item-actions">
+                        <button
+                          className="installment-item-btn"
+                          onClick={() => handleInstallment(item)}
+                          title="Trả góp sản phẩm này"
+                        >
+                          <i className="fas fa-percentage"></i>
+                          Trả góp
+                        </button>
+                        <button
+                          className="remove-btn"
+                          onClick={() => handleRemoveItem(item._id)}
+                          disabled={updating[item._id]}
+                          title="Xóa sản phẩm"
+                        >
+                          {updating[item._id] ? (
+                            <i className="fas fa-spinner fa-spin"></i>
+                          ) : (
+                            <i className="fas fa-trash"></i>
+                          )}
+                        </button>
+                      </div>
                     </div>
                   </div>
                 ))}
@@ -296,11 +313,15 @@ const ModernCart = () => {
                       Đăng nhập để mua hàng
                     </Link>
                   )}
+                </div>
 
-                  <button className="btn btn-outline btn-installment">
-                    <i className="fas fa-percentage"></i>
-                    Trả góp 0%
-                  </button>
+                {/* Info text */}
+                <div className="installment-info">
+                  <i className="fas fa-info-circle"></i>
+                  <span>
+                    Bạn có thể chọn trả góp cho từng sản phẩm bằng cách nhấn nút
+                    "Trả góp" bên cạnh sản phẩm
+                  </span>
                 </div>
 
                 {/* Trust Badges */}

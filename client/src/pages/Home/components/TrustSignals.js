@@ -15,12 +15,6 @@ const TrustSignals = () => {
         "Giao hàng trong 2-24h tại Hà Nội, HCM. Miễn phí ship với đơn từ 500k",
     },
     {
-      icon: "fas fa-tools",
-      title: "Bảo hành tận nơi",
-      description:
-        "Bảo hành chính hãng 12 tháng. Hỗ trợ đổi mới trong 7 ngày đầu",
-    },
-    {
       icon: "fas fa-phone-alt",
       title: "Hỗ trợ 24/7",
       description:

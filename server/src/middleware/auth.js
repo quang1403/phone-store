@@ -24,4 +24,24 @@ const isAdmin = (req, res, next) => {
   return res.status(403).json({ error: "Chỉ admin mới được truy cập" });
 };
 
-module.exports = { auth, isAdmin };
+// Middleware auth tùy chọn - không bắt buộc đăng nhập
+const optionalAuth = (req, res, next) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    // Không có token, tiếp tục nhưng không set req.user
+    req.user = null;
+    return next();
+  }
+  const token = authHeader.split(" ")[1];
+  try {
+    const decoded = jwt.verify(token, "secret_key");
+    req.user = decoded;
+    next();
+  } catch (err) {
+    // Token không hợp lệ, tiếp tục nhưng không set req.user
+    req.user = null;
+    next();
+  }
+};
+
+module.exports = { auth, isAdmin, optionalAuth };

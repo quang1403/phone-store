@@ -2,12 +2,11 @@ import { useState, useEffect } from "react";
 import { ToastContainer, toast } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
 import { Link } from "react-router-dom";
-import { searchProducts, getBrands, getCategories } from "../../services/Api";
+import { searchProducts, getCategories } from "../../services/Api";
 import ProductItem from "../../shared/components/ProductItem";
 import HeroSection from "./components/HeroSection";
 import BlogSection from "./components/BlogSection";
 import FeaturedProducts from "./components/FeaturedProducts";
-import BrandShowcase from "./components/BrandShowcase";
 import TrustSignals from "./components/TrustSignals";
 import Newsletter from "./components/Newsletter";
 import "./ModernHome.css";
@@ -43,7 +42,6 @@ const ModernHome = () => {
   }, []);
   const [featuredProducts, setFeaturedProducts] = useState([]);
   const [latestProducts, setLatestProducts] = useState([]);
-  const [brands, setBrands] = useState([]);
   const [categories, setCategories] = useState([]);
   const [categoriesLoaded, setCategoriesLoaded] = useState(false);
   const [tabletProducts, setTabletProducts] = useState([]);
@@ -94,10 +92,6 @@ const ModernHome = () => {
           });
           setAccessoryProducts(accessoryRes.data.data || []);
         }
-
-        // Fetch brands
-        const brandsRes = await getBrands({});
-        setBrands(brandsRes.data.data || []);
       } catch (error) {
         console.error("Error fetching home data:", error);
       } finally {
@@ -127,22 +121,7 @@ const ModernHome = () => {
   return (
     <div className="home-container">
       <ToastContainer />
-      {/* Hero Section with Banner/Slider */}
       <HeroSection />
-
-      {/* Blog/Tech News Section */}
-      <section className="home-section home-blog-section">
-        <div className="home-inner-container">
-          <div className="home-section-header">
-            <h2>Tin tức công nghệ</h2>
-            <p>Cập nhật xu hướng và đánh giá sản phẩm mới nhất</p>
-            <Link to="/news" className="home-view-all-btn">
-              Xem tất cả <i className="fas fa-arrow-right"></i>
-            </Link>
-          </div>
-          <BlogSection />
-        </div>
-      </section>
 
       {/* Featured Products */}
       <section className="home-section home-featured-section">
@@ -210,14 +189,17 @@ const ModernHome = () => {
         </section>
       )}
 
-      {/* Brand Showcase */}
-      <section className="home-section home-brands-section">
+      {/* Blog/Tech News Section */}
+      <section className="home-section home-blog-section">
         <div className="home-inner-container">
           <div className="home-section-header">
-            <h2>Thương hiệu nổi tiếng</h2>
-            <p>Các thương hiệu điện thoại hàng đầu thế giới</p>
+            <h2>Tin tức công nghệ</h2>
+            <p>Cập nhật xu hướng và đánh giá sản phẩm mới nhất</p>
+            <Link to="/news" className="home-view-all-btn">
+              Xem tất cả <i className="fas fa-arrow-right"></i>
+            </Link>
           </div>
-          <BrandShowcase brands={brands} />
+          <BlogSection />
         </div>
       </section>
 

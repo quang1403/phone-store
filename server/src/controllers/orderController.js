@@ -36,7 +36,20 @@ exports.lookupWarranty = async (req, res) => {
 // Lấy tất cả đơn hàng (admin)
 exports.getAllOrders = async (req, res) => {
   try {
-    const orders = await Order.find().populate("customerId", "name email");
+    const { isInstallment } = req.query;
+
+    let filter = {};
+    // Lọc đơn trả góp nếu có query param
+    if (isInstallment === "true") {
+      filter["installment.isInstallment"] = true;
+    } else if (isInstallment === "false") {
+      filter["installment.isInstallment"] = { $ne: true };
+    }
+
+    const orders = await Order.find(filter).populate(
+      "customerId",
+      "name email"
+    );
     res.json({ orders });
   } catch (err) {
     console.error("Lỗi lấy tất cả đơn hàng:", err);
@@ -68,13 +81,23 @@ exports.updateOrderStatus = async (req, res) => {
       console.error("Thiếu orderId hoặc status", { orderId, status });
       return res.status(400).json({ error: "Thiếu orderId hoặc status" });
     }
-    const order = await Order.findById(orderId);
+    const order = await Order.findById(orderId).populate("items.productId");
     if (!order) {
       console.error("Không tìm thấy đơn hàng với orderId:", orderId);
       return res.status(404).json({ error: "Không tìm thấy đơn hàng" });
     }
+
+    // Lưu trạng thái cũ để so sánh
+    const oldStatus = order.status;
     order.status = status;
     await order.save();
+
+    // ✅ TỰ ĐỘNG CẬP NHẬT hasPurchased KHI ĐỐN HÀNG HOÀN THÀNH
+    // Nếu order chuyển sang trạng thái 3 (Đã giao) hoặc 4 (Hoàn thành)
+    if ((status === 3 || status === 4) && oldStatus !== status) {
+      await updateCommentsHasPurchased(order);
+    }
+
     res.json({ message: "Cập nhật trạng thái thành công", order });
   } catch (err) {
     console.error("Lỗi cập nhật trạng thái đơn hàng:", err);
@@ -83,32 +106,54 @@ exports.updateOrderStatus = async (req, res) => {
       .json({ error: "Lỗi cập nhật trạng thái đơn hàng", details: err });
   }
 };
-// src/controllers/orderController.js
+
+// ─────────────────────────────────────────────────────────────────────────
+// FUNCTION HỖ TRỢ: TỰ ĐỘNG CẬP NHẬT hasPurchased CHO COMMENTS
+// ─────────────────────────────────────────────────────────────────────────
+async function updateCommentsHasPurchased(order) {
+  try {
+    // Lấy danh sách productId từ đơn hàng
+    const productIds = order.items.map(
+      (item) => item.productId?._id || item.productId
+    );
+
+    if (productIds.length === 0) {
+      console.log("⚠️  Đơn hàng không có sản phẩm");
+      return;
+    }
+
+    // Cập nhật tất cả comments của user này cho các sản phẩm trong đơn
+    const result = await Comment.updateMany(
+      {
+        customerId: order.customerId,
+        productId: { $in: productIds },
+      },
+      {
+        $set: { hasPurchased: true },
+      }
+    );
+
+    if (result.modifiedCount > 0) {
+      console.log("═══════════════════════════════════════════════════════=");
+      console.log("✅ TỰ ĐỘNG CẬP NHẬT hasPurchased");
+      console.log(`   Số comments đã cập nhật: ${result.modifiedCount}`);
+      console.log(`   User ID: ${order.customerId}`);
+      console.log(`   Đơn hàng: ${order._id}`);
+      console.log(`   Sản phẩm: ${productIds.length} sản phẩm`);
+      console.log("═══════════════════════════════════════════════════════=");
+    } else {
+      console.log(
+        `ℹ️  Không có comment nào cần cập nhật cho user ${order.customerId}`
+      );
+    }
+  } catch (error) {
+    console.error("❌ Lỗi cập nhật hasPurchased cho comments:", error);
+    // Không throw error để không ảnh hưởng đến việc cập nhật order
+  }
+}
 const Order = require("../models/Order");
 const Product = require("../models/Product");
-// Cập nhật trạng thái đơn hàng
-exports.updateOrderStatus = async (req, res) => {
-  try {
-    const { orderId, status } = req.body;
-    if (!orderId || typeof status !== "number") {
-      console.error("Thiếu orderId hoặc status", { orderId, status });
-      return res.status(400).json({ error: "Thiếu orderId hoặc status" });
-    }
-    const order = await Order.findById(orderId);
-    if (!order) {
-      console.error("Không tìm thấy đơn hàng với orderId:", orderId);
-      return res.status(404).json({ error: "Không tìm thấy đơn hàng" });
-    }
-    order.status = status;
-    await order.save();
-    res.json({ message: "Cập nhật trạng thái thành công", order });
-  } catch (err) {
-    console.error("Lỗi cập nhật trạng thái đơn hàng:", err);
-    res
-      .status(400)
-      .json({ error: "Lỗi cập nhật trạng thái đơn hàng", details: err });
-  }
-};
+const Comment = require("../models/Comment");
 
 // Thêm đơn hàng mới
 exports.createOrder = async (req, res) => {
@@ -126,6 +171,7 @@ exports.createOrder = async (req, res) => {
       status,
       paymentMethod,
       total: totalFromFE,
+      installment, // Thông tin trả góp (nếu có)
     } = req.body;
     // items chỉ gồm productId và quantity
     // Lấy giá từ Product cho từng item
@@ -158,12 +204,53 @@ exports.createOrder = async (req, res) => {
         productId: item.productId,
         quantity: item.quantity,
         price,
+        memory: item.memory || "",
+        color: item.color || "",
         ram: item.ram || "",
         storage: item.storage || "",
         variant: item.variant || {},
         warrantyMonths,
       });
       total += price * (item.quantity || 1);
+    }
+
+    // Xử lý thông tin trả góp (nếu có)
+    let installmentData = null;
+    if (installment && installment.isInstallment) {
+      const principal = total - (installment.upfront || 0);
+      let monthlyPayment, totalPayment;
+
+      if (installment.type === "creditCard") {
+        // Trả góp qua thẻ tín dụng: không lãi suất
+        monthlyPayment = principal / (installment.months || 12);
+        totalPayment =
+          monthlyPayment * (installment.months || 12) +
+          (installment.upfront || 0);
+      } else if (installment.type === "financeCompany") {
+        // Trả góp qua công ty tài chính: có lãi suất
+        const monthlyRate =
+          installment.interestRate > 0 ? installment.interestRate / 100 : 0.02;
+        monthlyPayment =
+          (principal * monthlyRate) /
+          (1 - Math.pow(1 + monthlyRate, -(installment.months || 12)));
+        totalPayment =
+          monthlyPayment * (installment.months || 12) +
+          (installment.upfront || 0);
+      }
+
+      installmentData = {
+        isInstallment: true,
+        type: installment.type,
+        upfront: installment.upfront || 0,
+        months: installment.months || 12,
+        interestRate: installment.interestRate || 0,
+        monthlyPayment: Math.round(monthlyPayment),
+        totalPayment: Math.round(totalPayment),
+        transactionId: installment.transactionId || "",
+        financeStatus: installment.financeStatus || "pending",
+        customerInfo: installment.customerInfo || {},
+        uploadedDocuments: installment.uploadedDocuments || {},
+      };
     }
 
     const order = new Order({
@@ -175,6 +262,7 @@ exports.createOrder = async (req, res) => {
       note,
       status: 0,
       paymentMethod: paymentMethod || "cod",
+      installment: installmentData,
     });
     await order.save();
 
@@ -190,19 +278,52 @@ exports.createOrder = async (req, res) => {
     // Gửi mail xác nhận đơn hàng cho khách
     try {
       const sendMail = require("../utils/sendMail");
+      const { orderConfirmationTemplate } = require("../utils/emailTemplates");
+
       let email = req.user.email;
+      let customerName = req.user.name || "Quý khách";
+
       if (!email) {
         const user = await require("../models/User").findById(customerId);
         email = user?.email;
+        customerName = user?.name || "Quý khách";
       }
+
       if (email) {
+        // Chuẩn bị dữ liệu cho template
+        const itemsWithDetails = await Promise.all(
+          populatedItems.map(async (item) => {
+            const product = await Product.findById(item.productId);
+            return {
+              name: product?.name || "Sản phẩm",
+              quantity: item.quantity,
+              price: item.price,
+              color: item.color || "",
+              memory: item.memory || "",
+              ram: item.ram || "",
+              storage: item.storage || "",
+            };
+          })
+        );
+
+        const emailHtml = orderConfirmationTemplate({
+          orderId: order._id,
+          customerName,
+          items: itemsWithDetails,
+          total,
+          address,
+          phone,
+          paymentMethod: paymentMethod || "cod",
+          orderDate: new Date(order.createdAt).toLocaleString("vi-VN"),
+        });
+
         await sendMail({
           to: email,
-          subject: "Xác nhận đơn hàng",
-          text: `Đơn hàng của bạn đã được tạo thành công. Mã đơn hàng: ${order._id}. Tổng tiền: ${total} VND.`,
-          html: `<h1>Đơn hàng của bạn đã được tạo thành công</h1><p>Mã đơn hàng: <b>${
+          subject: "✅ Xác nhận đơn hàng #" + order._id,
+          text: `Đơn hàng của bạn đã được tạo thành công. Mã đơn hàng: ${
             order._id
-          }</b></p><p>Tổng tiền: <b>${total.toLocaleString()} VND</b></p>`,
+          }. Tổng tiền: ${total.toLocaleString()} VND.`,
+          html: emailHtml,
         });
       }
     } catch (mailErr) {
@@ -220,12 +341,151 @@ exports.createOrder = async (req, res) => {
 exports.getOrdersByCustomer = async (req, res) => {
   try {
     const customerId = req.user.id;
-    const orders = await Order.find({ customerId }).populate("items.productId");
+    const { isInstallment } = req.query;
+
+    let filter = { customerId };
+    // Lọc đơn trả góp nếu có query param
+    if (isInstallment === "true") {
+      filter["installment.isInstallment"] = true;
+    } else if (isInstallment === "false") {
+      filter["installment.isInstallment"] = { $ne: true };
+    }
+
+    const orders = await Order.find(filter)
+      .populate("items.productId")
+      .sort({ createdAt: -1 }); // Sắp xếp mới nhất trước
+
     res.json(orders);
   } catch (err) {
     res.status(500).json({ error: "Lỗi khi lấy danh sách đơn hàng" });
   }
 };
+// Cập nhật trạng thái trả góp (admin)
+exports.updateInstallmentStatus = async (req, res) => {
+  try {
+    const orderId = req.params.id;
+    const { financeStatus } = req.body;
+
+    if (!["pending", "approved", "rejected"].includes(financeStatus)) {
+      return res.status(400).json({
+        error:
+          "Trạng thái không hợp lệ. Phải là: pending, approved, hoặc rejected",
+      });
+    }
+
+    const order = await Order.findById(orderId).populate(
+      "customerId",
+      "name email"
+    );
+    if (!order) {
+      return res.status(404).json({ error: "Không tìm thấy đơn hàng" });
+    }
+
+    if (!order.installment || !order.installment.isInstallment) {
+      return res
+        .status(400)
+        .json({ error: "Đơn hàng này không phải đơn trả góp" });
+    }
+
+    // Cập nhật trạng thái trả góp
+    order.installment.financeStatus = financeStatus;
+
+    // Nếu duyệt hồ sơ, chuyển đơn hàng sang trạng thái đã xác nhận
+    if (financeStatus === "approved") {
+      order.status = 1; // Đã xác nhận
+    }
+
+    // Nếu từ chối, hủy đơn hàng
+    if (financeStatus === "rejected") {
+      order.status = 4; // Đã hủy
+      // Cộng lại stock cho từng sản phẩm
+      for (const item of order.items) {
+        await Product.findByIdAndUpdate(
+          item.productId,
+          { $inc: { stock: Math.abs(item.quantity || 1) } },
+          { new: true }
+        );
+      }
+    }
+
+    await order.save();
+
+    // Gửi email thông báo cho khách hàng
+    try {
+      const sendMail = require("../utils/sendMail");
+      const {
+        installmentApprovedTemplate,
+        installmentRejectedTemplate,
+      } = require("../utils/emailTemplates");
+
+      const email = order.customerId?.email;
+      const customerName = order.customerId?.name || "Quý khách";
+
+      if (email) {
+        let subject, text, html;
+        if (financeStatus === "approved") {
+          subject = "✅ Hồ sơ trả góp đã được duyệt";
+          text = `Chúc mừng! Hồ sơ trả góp của bạn đã được công ty tài chính phê duyệt. Mã đơn hàng: ${order._id}`;
+          html = installmentApprovedTemplate({
+            customerName,
+            orderId: order._id,
+            monthlyPayment: order.installment?.monthlyPayment || 0,
+            months: order.installment?.months || 12,
+          });
+        } else if (financeStatus === "rejected") {
+          subject = "❌ Hồ sơ trả góp chưa được duyệt";
+          text = `Rất tiếc, hồ sơ trả góp của bạn chưa được công ty tài chính phê duyệt. Mã đơn hàng: ${order._id}`;
+          html = installmentRejectedTemplate({
+            customerName,
+            orderId: order._id,
+          });
+        }
+        if (subject) {
+          await sendMail({ to: email, subject, text, html });
+        }
+      }
+    } catch (mailErr) {
+      console.error("Lỗi gửi mail thông báo trạng thái trả góp:", mailErr);
+    }
+
+    res.json({
+      message: "Cập nhật trạng thái trả góp thành công",
+      order,
+    });
+  } catch (err) {
+    console.error("Lỗi cập nhật trạng thái trả góp:", err);
+    res.status(500).json({
+      error: "Lỗi cập nhật trạng thái trả góp",
+      details: err.message,
+    });
+  }
+};
+
+// Lấy danh sách đơn hàng trả góp (admin)
+exports.getInstallmentOrders = async (req, res) => {
+  try {
+    const { financeStatus } = req.query;
+
+    const filter = { "installment.isInstallment": true };
+    if (financeStatus) {
+      filter["installment.financeStatus"] = financeStatus;
+    }
+
+    const orders = await Order.find(filter)
+      .populate("customerId", "name email phone")
+      .populate("items.productId", "name images")
+      .sort({ createdAt: -1 });
+
+    res.json({ success: true, orders });
+  } catch (err) {
+    console.error("Lỗi lấy danh sách đơn hàng trả góp:", err);
+    res.status(500).json({
+      error: "Lỗi lấy danh sách đơn hàng trả góp",
+      details: err.message,
+    });
+  }
+};
+
 // Xóa đơn hàng
 exports.deleteOrder = async (req, res) => {
   try {

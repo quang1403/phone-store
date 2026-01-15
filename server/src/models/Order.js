@@ -31,6 +31,14 @@ const orderSchema = new mongoose.Schema(
           type: String,
           required: false,
         },
+        ram: {
+          type: String,
+          required: false,
+        },
+        storage: {
+          type: String,
+          required: false,
+        },
         variant: {
           type: Object,
           required: false,
@@ -38,7 +46,7 @@ const orderSchema = new mongoose.Schema(
         warrantyMonths: {
           type: Number,
           required: false,
-          default: 12, // mặc định 12 tháng, có thể lấy từ Product
+          default: 12,
         },
       },
     ],
@@ -60,15 +68,77 @@ const orderSchema = new mongoose.Schema(
     },
     paymentMethod: {
       type: String,
-      enum: ["cod", "online"],
+      enum: ["cod", "online", "creditCard", "installment"],
       required: true,
       default: "cod",
     },
     status: {
       type: Number,
-      enum: [0, 1, 2, 3, 4], // 0: chờ xác nhận, 1: đã xác nhận, 2: đang giao, 3: đã giao, 4: đã hủy
+      enum: [0, 1, 2, 3, 4],
       default: 0,
       required: true,
+    },
+    // Thông tin trả góp (nếu có)
+    installment: {
+      isInstallment: {
+        type: Boolean,
+        default: false,
+      },
+      type: {
+        type: String,
+        enum: ["creditCard", "financeCompany"],
+      },
+      upfront: {
+        type: Number,
+        default: 0,
+      },
+      months: {
+        type: Number,
+        default: 0,
+      },
+      interestRate: {
+        type: Number,
+        default: 0,
+      },
+      monthlyPayment: {
+        type: Number,
+        default: 0,
+      },
+      totalPayment: {
+        type: Number,
+        default: 0,
+      },
+      transactionId: {
+        type: String,
+      },
+      financeStatus: {
+        type: String,
+        enum: ["pending", "approved", "rejected"],
+      },
+      // Thông tin khách hàng - ĐÃ CẬP NHẬT
+      customerInfo: {
+        // Cho thẻ tín dụng
+        cardHolder: String,
+        cardNumber: String,
+        bank: String,
+        // Cho công ty tài chính
+        fullName: String,
+        idNumber: String,
+        // Chung
+        phone: String,
+        email: String,
+        address: String,
+        monthlyIncome: String,
+        relativePhone1: String,
+        relativePhone2: String,
+      },
+      // Giấy tờ upload - THÊM MỚI
+      uploadedDocuments: {
+        idCardFront: String,
+        idCardBack: String,
+        householdBook: String,
+        incomeProof: String,
+      },
     },
   },
   { timestamps: true }

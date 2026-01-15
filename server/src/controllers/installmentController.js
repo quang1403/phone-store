@@ -7,7 +7,13 @@ const Product = require("../models/Product");
  */
 exports.calculateInstallment = async (req, res) => {
   try {
-    const { productId, upfront = 0, months = 12, interestRate = 0 } = req.body;
+    const {
+      productId,
+      upfront = 0,
+      months = 12,
+      interestRate = 0,
+      type = "creditCard",
+    } = req.body;
     if (!productId) {
       return res.status(400).json({ success: false, error: "Thiếu productId" });
     }
@@ -19,39 +25,71 @@ exports.calculateInstallment = async (req, res) => {
     }
     const price = product.price;
     const principal = price - upfront;
-    // Tính lãi suất hàng tháng
-    const monthlyRate = interestRate > 0 ? interestRate / 100 / 12 : 0;
-    let monthlyPayment;
-    if (monthlyRate > 0) {
-      // Công thức trả góp có lãi suất
+    let monthlyPayment,
+      totalPayment,
+      monthlyRate,
+      detail,
+      extraInfo = {};
+
+    if (type === "creditCard") {
+      // Trả góp qua thẻ tín dụng: không lãi suất
+      monthlyPayment = principal / months;
+      totalPayment = monthlyPayment * months + upfront;
+      detail = `Trả góp qua thẻ tín dụng: Trả trước ${upfront.toLocaleString()}đ, trả góp ${months} tháng, mỗi tháng khoảng ${Math.round(
+        monthlyPayment
+      ).toLocaleString()}đ. Tổng phải trả: ${Math.round(
+        totalPayment
+      ).toLocaleString()}đ.`;
+      extraInfo = {
+        required: "Thẻ tín dụng hợp lệ, đủ hạn mức",
+        note: "Không cần xét duyệt hồ sơ, xác thực qua OTP ngân hàng khi thanh toán.",
+      };
+    } else if (type === "financeCompany") {
+      // Trả góp qua công ty tài chính: có lãi suất
+      monthlyRate = interestRate > 0 ? interestRate / 100 : 0.02; // lãi suất truyền vào là %/tháng, nếu chưa truyền thì mặc định 2%/tháng
       monthlyPayment =
         (principal * monthlyRate) / (1 - Math.pow(1 + monthlyRate, -months));
+      totalPayment = monthlyPayment * months + upfront;
+      detail = `Trả góp qua công ty tài chính: Trả trước ${upfront.toLocaleString()}đ, trả góp ${months} tháng, lãi suất ${(
+        monthlyRate * 100
+      ).toFixed(2)}%/tháng, mỗi tháng khoảng ${Math.round(
+        monthlyPayment
+      ).toLocaleString()}đ. Tổng phải trả: ${Math.round(
+        totalPayment
+      ).toLocaleString()}đ.`;
+      extraInfo = {
+        required: "CMND/CCCD, ảnh chân dung, giấy tờ chứng minh thu nhập",
+        note: "Công ty tài chính sẽ xét duyệt hồ sơ, xác thực qua gọi điện hoặc gặp trực tiếp.",
+      };
     } else {
-      // Trả góp không lãi suất
+      // Mặc định: không lãi suất
       monthlyPayment = principal / months;
+      totalPayment = monthlyPayment * months + upfront;
+      detail = `Trả góp: Trả trước ${upfront.toLocaleString()}đ, trả góp ${months} tháng, mỗi tháng khoảng ${Math.round(
+        monthlyPayment
+      ).toLocaleString()}đ. Tổng phải trả: ${Math.round(
+        totalPayment
+      ).toLocaleString()}đ.`;
     }
-    const totalPayment = monthlyPayment * months + upfront;
+
     res.json({
       success: true,
       product: { id: product._id, name: product.name, price },
       upfront,
       months,
-      interestRate,
+      interestRate:
+        type === "financeCompany" ? (monthlyRate * 100).toFixed(2) : 0, // trả về %/tháng
       monthlyPayment: Math.round(monthlyPayment),
       totalPayment: Math.round(totalPayment),
-      detail: `Trả trước ${upfront.toLocaleString()}đ, trả góp ${months} tháng, mỗi tháng khoảng ${Math.round(
-        monthlyPayment
-      ).toLocaleString()}đ. Tổng phải trả: ${Math.round(
-        totalPayment
-      ).toLocaleString()}đ.`,
+      type,
+      detail,
+      extraInfo,
     });
   } catch (error) {
-    res
-      .status(500)
-      .json({
-        success: false,
-        error: "Lỗi tính trả góp",
-        details: error.message,
-      });
+    res.status(500).json({
+      success: false,
+      error: "Lỗi tính trả góp",
+      details: error.message,
+    });
   }
 };

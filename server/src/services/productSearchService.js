@@ -17,8 +17,78 @@ class ProductSearchService {
     // Ưu tiên tìm theo tên sản phẩm nếu có tên cụ thể trong câu hỏi
     const queryLower = query.toLowerCase();
 
+    // Bước 0: Tìm kiếm chính xác theo tên sản phẩm cụ thể (EXACT MATCH - ƯU TIÊN CAO NHẤT)
+    // Pattern để trích xuất tên sản phẩm cụ thể (brand + model + variant)
+    const exactProductMatch = query.match(
+      /(iphone|ipad|samsung galaxy|galaxy|xiaomi pad|xiaomi|redmi|oppo|vivo|realme|nokia|airpod|airpods|tai nghe|headphone|earphone)\s*(\d{0,2}[\s\w]*(?:pro|max|ultra|plus|mini|note|air|se|pro max|ultra max)?)/i
+    );
+
+    if (exactProductMatch) {
+      const fullMatch = exactProductMatch[0].trim();
+
+      // Tìm sản phẩm có tên chứa chuỗi này (case-insensitive, flexible spacing)
+      const exactProducts = await Product.find({
+        name: { $regex: new RegExp(fullMatch.replace(/\s+/g, "\\s*"), "i") },
+      })
+        .populate("brand", "name logo")
+        .populate("category", "name")
+        .limit(20);
+
+      if (exactProducts.length > 0) {
+        console.log(
+          `🎯 Exact match found ${exactProducts.length} products for "${fullMatch}"`
+        );
+
+        // Scoring: Ưu tiên sản phẩm match chính xác nhất
+        const scoredProducts = exactProducts.map((product) => {
+          const productNameLower = product.name.toLowerCase();
+          const queryTerms = fullMatch.toLowerCase().split(/\s+/);
+
+          let score = 0;
+
+          // +100 điểm nếu tên sản phẩm bắt đầu với query
+          if (productNameLower.startsWith(fullMatch.toLowerCase())) {
+            score += 100;
+          }
+
+          // +50 điểm nếu tên sản phẩm chứa toàn bộ query liên tiếp
+          if (productNameLower.includes(fullMatch.toLowerCase())) {
+            score += 50;
+          }
+
+          // +10 điểm cho mỗi từ khóa khớp
+          queryTerms.forEach((term) => {
+            if (productNameLower.includes(term)) {
+              score += 10;
+            }
+          });
+
+          // -0.1 điểm cho mỗi ký tự chênh lệch về độ dài (giảm penalty)
+          const lengthDiff = Math.abs(
+            productNameLower.length - fullMatch.length
+          );
+          score -= lengthDiff * 0.1;
+
+          console.log(`   Product: "${product.name}" → Score: ${score}`);
+          return { product, score };
+        });
+
+        // Sắp xếp theo điểm số giảm dần
+        scoredProducts.sort((a, b) => b.score - a.score);
+
+        console.log(
+          `✅ Top result: "${scoredProducts[0]?.product.name}" (score: ${scoredProducts[0]?.score})`
+        );
+
+        // Trả về danh sách sản phẩm đã được sắp xếp
+        return scoredProducts.map((item) => item.product);
+      } else {
+        console.log(`❌ No exact match for "${fullMatch}"`);
+      }
+    }
+
     // Bước 1: Thử tìm kiếm trực tiếp theo tên sản phẩm (linh hoạt hơn)
-    // Loại bỏ các từ phổ biến không liên quan
+    // Loại bỏ các từ phổ biến không liên quan (GIỮ LẠI TÊN SẢN PHẨM)
     const stopWords = [
       "giá",
       "còn",
@@ -35,13 +105,22 @@ class ProductSearchService {
       "tôi",
       "tất",
       "cả",
-      "phiên",
-      "bản",
       "nào",
       "thế",
       "là",
       "của",
       "và",
+      "trả",
+      "góp",
+      "như",
+      "thế",
+      "nào",
+      "phải",
+      "được",
+      "này",
+      "đó",
+      "ạ",
+      "nhé",
     ];
     let searchTerms = query.toLowerCase();
     stopWords.forEach((word) => {
@@ -73,9 +152,9 @@ class ProductSearchService {
       }
     }
 
-    // Bước 2: Thử tìm theo regex brand cố định (fallback)
+    // Bước 2: Thử tìm theo regex brand cố định (fallback) - LINH HOẠT HƠN
     const nameMatch = query.match(
-      /(iphone|samsung|xiaomi|oppo|vivo|realme|ipad|macbook|nokia|galaxy|redmi|note|pro|max|ultra|plus|mini|air)[^\d]*(\d{1,3}(?: [^\s]+)*)?/i
+      /(iphone|ipad|samsung galaxy|galaxy|xiaomi pad|xiaomi|oppo|vivo|realme|macbook|nokia|redmi|airpod|airpods|tai nghe|headphone|earphone)\s*[\w\s]*?(\d{0,3}(?:\s*(?:pro|max|ultra|plus|mini|note|air|se))*)/i
     );
 
     if (nameMatch) {
@@ -98,7 +177,28 @@ class ProductSearchService {
     }
 
     // Bước 3: Nếu không tìm thấy theo tên, dùng bộ lọc như cũ
+    console.log("Fallback to findProducts với filters:", filters);
     products = await this.findProducts(filters);
+
+    if (products.length === 0) {
+      console.log("Không tìm thấy sản phẩm nào với tất cả các bước");
+      // Bước 4: Last resort - tìm sản phẩm tương tự theo brand
+      const brandMatch = query.match(
+        /(iphone|ipad|samsung|xiaomi|oppo|vivo|realme|nokia|airpod|tai nghe|headphone)/i
+      );
+      if (brandMatch) {
+        const brand = brandMatch[1];
+        console.log(`Last resort: Tìm sản phẩm ${brand} bất kỳ`);
+        products = await Product.find({
+          name: { $regex: new RegExp(brand, "i") },
+          stock: { $gt: 0 },
+        })
+          .populate("brand", "name logo")
+          .populate("category", "name")
+          .limit(10);
+      }
+    }
+
     return products;
   }
 

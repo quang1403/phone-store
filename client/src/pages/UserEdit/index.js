@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import "./UserEdit.css";
 import { useSelector } from "react-redux";
 import {
   updateUser,
@@ -38,10 +37,17 @@ const UserEdit = () => {
   const [loadingAddresses, setLoadingAddresses] = useState(true);
   const [showAddressModal, setShowAddressModal] = useState(false);
   const [editingAddress, setEditingAddress] = useState(null);
+  // Trả góp
+  const [installmentOrders, setInstallmentOrders] = useState([]);
+  const [loadingInstallment, setLoadingInstallment] = useState(true);
+  const [selectedInstallment, setSelectedInstallment] = useState(null);
+  const [showInstallmentModal, setShowInstallmentModal] = useState(false);
   // Load địa chỉ khi vào tab Sổ địa chỉ
   useEffect(() => {
     if (activeTab === "address") {
       loadUserAddresses();
+    } else if (activeTab === "installment") {
+      loadInstallmentOrders();
     }
   }, [activeTab]);
 
@@ -55,6 +61,21 @@ const UserEdit = () => {
       setUserAddresses([]);
     } finally {
       setLoadingAddresses(false);
+    }
+  };
+
+  const loadInstallmentOrders = async () => {
+    try {
+      setLoadingInstallment(true);
+      // Sử dụng đúng endpoint chuẩn từ BE
+      const response = await Http.get("/orders?isInstallment=true");
+      const orders = response.data || [];
+      setInstallmentOrders(orders);
+    } catch (error) {
+      console.error("Lỗi load đơn hàng trả góp:", error);
+      setInstallmentOrders([]);
+    } finally {
+      setLoadingInstallment(false);
     }
   };
 
@@ -226,8 +247,11 @@ const UserEdit = () => {
           >
             Sổ địa chỉ
           </li>
-          <li style={{ color: "#aaa", cursor: "not-allowed" }}>
-            Thông báo của tôi
+          <li
+            className={activeTab === "installment" ? "active" : ""}
+            onClick={() => setActiveTab("installment")}
+          >
+            Thông tin trả góp
           </li>
           <li style={{ color: "#aaa", cursor: "not-allowed" }}>Đơn đặt hàng</li>
           <li
@@ -401,6 +425,274 @@ const UserEdit = () => {
               editingAddress={editingAddress}
               title={editingAddress ? "Cập nhật địa chỉ" : "Thêm địa chỉ mới"}
             />
+          </div>
+        )}
+        {activeTab === "installment" && (
+          <div className="user-installment-info">
+            <h2>Thông tin trả góp</h2>
+            {loadingInstallment ? (
+              <div>Đang tải thông tin trả góp...</div>
+            ) : installmentOrders.length === 0 ? (
+              <div
+                style={{ padding: "20px", textAlign: "center", color: "#999" }}
+              >
+                Bạn chưa có đơn hàng trả góp nào.
+              </div>
+            ) : (
+              <table className="installment-table">
+                <thead>
+                  <tr>
+                    <th>Mã đơn</th>
+                    <th>Hình thức</th>
+                    <th>Trả hàng tháng</th>
+                    <th>Số kỳ hạn</th>
+                    <th>Trạng thái</th>
+                    <th>Ngày tạo</th>
+                    <th>Thao tác</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {installmentOrders.map((order) => {
+                    const { installment } = order;
+                    const statusLabels = {
+                      pending: "Chờ duyệt",
+                      approved: "Đã duyệt",
+                      rejected: "Đã từ chối",
+                    };
+                    const statusColors = {
+                      pending: "#f39c12",
+                      approved: "#27ae60",
+                      rejected: "#e74c3c",
+                    };
+
+                    return (
+                      <tr key={order._id}>
+                        <td>#{order._id.slice(-8)}</td>
+                        <td>
+                          {installment.type === "creditCard"
+                            ? "💳 Thẻ tín dụng"
+                            : "🏦 Công ty TC"}
+                        </td>
+                        <td style={{ fontWeight: "bold", color: "#e74c3c" }}>
+                          {installment.monthlyPayment?.toLocaleString()} đ
+                        </td>
+                        <td>{installment.months} tháng</td>
+                        <td>
+                          <span
+                            className="installment-status-badge"
+                            style={{
+                              backgroundColor:
+                                statusColors[installment.financeStatus],
+                            }}
+                          >
+                            {statusLabels[installment.financeStatus]}
+                          </span>
+                        </td>
+                        <td>
+                          {new Date(order.createdAt).toLocaleDateString(
+                            "vi-VN"
+                          )}
+                        </td>
+                        <td>
+                          <button
+                            className="btn-view-detail"
+                            onClick={() => {
+                              setSelectedInstallment(order);
+                              setShowInstallmentModal(true);
+                            }}
+                          >
+                            Xem chi tiết
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            )}
+
+            {/* Modal chi tiết */}
+            {showInstallmentModal && selectedInstallment && (
+              <div
+                className="installment-modal-overlay"
+                onClick={() => setShowInstallmentModal(false)}
+              >
+                <div
+                  className="installment-modal-content"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div className="installment-modal-header">
+                    <h3>Chi tiết đơn hàng trả góp</h3>
+                    <button
+                      className="installment-modal-close"
+                      onClick={() => setShowInstallmentModal(false)}
+                    >
+                      ×
+                    </button>
+                  </div>
+                  <div className="installment-modal-body">
+                    {/* Thông tin sản phẩm */}
+                    <section className="modal-section">
+                      <h4>Thông tin sản phẩm</h4>
+                      {selectedInstallment.items?.map((item, idx) => (
+                        <div key={idx} className="product-item">
+                          <div className="product-info">
+                            <strong>
+                              {item.productId?.name || "Sản phẩm"}
+                            </strong>
+                            <div className="product-variant">
+                              {item.variant?.color && (
+                                <span>Màu: {item.variant.color}</span>
+                              )}
+                              {item.variant?.storage && (
+                                <span> | Bộ nhớ: {item.variant.storage}</span>
+                              )}
+                              {item.variant?.condition && (
+                                <span>
+                                  {" "}
+                                  | Tình trạng: {item.variant.condition}
+                                </span>
+                              )}
+                            </div>
+                            <div className="product-price">
+                              Số lượng: {item.quantity} | Giá:{" "}
+                              {item.price?.toLocaleString()} đ
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </section>
+
+                    {/* Thông tin trả góp */}
+                    <section className="modal-section">
+                      <h4>Thông tin trả góp</h4>
+                      <div className="info-grid">
+                        <div className="info-item">
+                          <strong>Hình thức:</strong>
+                          <span>
+                            {selectedInstallment.installment?.type ===
+                            "creditCard"
+                              ? "💳 Thẻ tín dụng"
+                              : "🏦 Công ty tài chính"}
+                          </span>
+                        </div>
+                        <div className="info-item">
+                          <strong>Trả trước:</strong>
+                          <span>
+                            {selectedInstallment.installment?.upfront?.toLocaleString()}{" "}
+                            đ
+                          </span>
+                        </div>
+                        <div className="info-item">
+                          <strong>Số kỳ hạn:</strong>
+                          <span>
+                            {selectedInstallment.installment?.months} tháng
+                          </span>
+                        </div>
+                        <div className="info-item">
+                          <strong>Lãi suất:</strong>
+                          <span>
+                            {selectedInstallment.installment?.interestRate}
+                            %/tháng
+                          </span>
+                        </div>
+                        <div className="info-item">
+                          <strong>Trả hàng tháng:</strong>
+                          <span
+                            style={{ color: "#e74c3c", fontWeight: "bold" }}
+                          >
+                            {selectedInstallment.installment?.monthlyPayment?.toLocaleString()}{" "}
+                            đ
+                          </span>
+                        </div>
+                        <div className="info-item">
+                          <strong>Tổng phải trả:</strong>
+                          <span
+                            style={{ fontWeight: "bold", fontSize: "16px" }}
+                          >
+                            {selectedInstallment.installment?.totalPayment?.toLocaleString()}{" "}
+                            đ
+                          </span>
+                        </div>
+                        <div className="info-item">
+                          <strong>Trạng thái:</strong>
+                          <span
+                            className="installment-status-badge"
+                            style={{
+                              backgroundColor: {
+                                pending: "#f39c12",
+                                approved: "#27ae60",
+                                rejected: "#e74c3c",
+                              }[selectedInstallment.installment?.financeStatus],
+                            }}
+                          >
+                            {
+                              {
+                                pending: "Chờ duyệt",
+                                approved: "Đã duyệt",
+                                rejected: "Đã từ chối",
+                              }[selectedInstallment.installment?.financeStatus]
+                            }
+                          </span>
+                        </div>
+                        {selectedInstallment.installment?.transactionId && (
+                          <div className="info-item">
+                            <strong>Mã giao dịch:</strong>
+                            <span style={{ fontFamily: "monospace" }}>
+                              {selectedInstallment.installment?.transactionId}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    </section>
+
+                    {/* Thông tin đơn hàng */}
+                    <section className="modal-section">
+                      <h4>Thông tin đơn hàng</h4>
+                      <div className="info-grid">
+                        <div className="info-item">
+                          <strong>Mã đơn:</strong>
+                          <span>{selectedInstallment._id}</span>
+                        </div>
+                        <div className="info-item">
+                          <strong>Ngày tạo:</strong>
+                          <span>
+                            {new Date(
+                              selectedInstallment.createdAt
+                            ).toLocaleString("vi-VN")}
+                          </span>
+                        </div>
+                        <div className="info-item">
+                          <strong>Địa chỉ:</strong>
+                          <span>{selectedInstallment.address}</span>
+                        </div>
+                        <div className="info-item">
+                          <strong>SĐT:</strong>
+                          <span>{selectedInstallment.phone}</span>
+                        </div>
+                        {selectedInstallment.note && (
+                          <div
+                            className="info-item"
+                            style={{ gridColumn: "1 / -1" }}
+                          >
+                            <strong>Ghi chú:</strong>
+                            <span>{selectedInstallment.note}</span>
+                          </div>
+                        )}
+                      </div>
+                    </section>
+                  </div>
+                  <div className="installment-modal-footer">
+                    <button
+                      className="btn-close-modal"
+                      onClick={() => setShowInstallmentModal(false)}
+                    >
+                      Đóng
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>

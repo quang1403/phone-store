@@ -12,6 +12,7 @@
   --shadow-lg: 0 4px 20px rgba(0, 0, 0, 0.15);
   --radius: 8px;
   --transition: all 0.3s ease;
+  --primary-gradient: linear-gradient(135deg, #42a5f5 0%, #1e88e5 100%);
 }
 
 /* Base Header Styles */
@@ -157,7 +158,7 @@
   font-weight: bold;
 }
 
-/* Navigation Menu - MobileCity Style */
+/* Navigation Menu  */
 .modern-header .header-nav.mobilecity-nav {
   background: #f8f9fa;
   border-bottom: 1px solid var(--border-color);
@@ -290,7 +291,7 @@
 }
 
 .modern-header .hotline-text {
-  display: flex;
+  text-align: center;
   flex-direction: column;
   line-height: 1.2;
 }
@@ -301,7 +302,7 @@
 }
 
 .modern-header .hotline-number {
-  font-size: 14px;
+  font-size: 13px;
   font-weight: bold;
 }
 

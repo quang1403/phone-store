@@ -4,6 +4,7 @@ import {
   updateOrderStatusAdmin,
   getProducts,
 } from "../../../services/Api";
+import "../styles/OrderManagement.css";
 
 // Helper function to determine if product is headphone
 const isHeadphoneProduct = (product) => {
@@ -61,6 +62,12 @@ const OrderManagement = ({ showToast, refreshUpdates }) => {
   const [orderIdFilter, setOrderIdFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [customerNameFilter, setCustomerNameFilter] = useState("");
+  const [startDateFilter, setStartDateFilter] = useState("");
+  const [endDateFilter, setEndDateFilter] = useState("");
+
+  // Pagination states
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage] = useState(10); // Số đơn hàng mỗi trang
 
   // Fetch orders from API (Admin version) và enrichment với product data
   const fetchOrders = async () => {
@@ -72,8 +79,6 @@ const OrderManagement = ({ showToast, refreshUpdates }) => {
         getAllOrdersAdmin(),
         getProducts(),
       ]);
-
-      console.log("📦 Admin API Response:", ordersRes); // Debug API response
 
       let orderList = [];
       // Xử lý response dựa trên cấu trúc API admin trả về
@@ -94,8 +99,6 @@ const OrderManagement = ({ showToast, refreshUpdates }) => {
       } else if (Array.isArray(productsRes.data)) {
         productList = productsRes.data;
       }
-
-      console.log("📋 Products loaded:", productList.length);
 
       // Tạo map sản phẩm theo ID để lookup nhanh
       const productMap = {};
@@ -124,11 +127,15 @@ const OrderManagement = ({ showToast, refreshUpdates }) => {
         return order;
       });
 
-      console.log("📋 Admin Orders loaded:", enrichedOrders.length); // Debug orders count
-      console.log("📋 Sample enriched order:", enrichedOrders[0]); // Debug first order
+      // Sắp xếp đơn hàng mới nhất trước (giảm dần theo createdAt)
+      const sortedOrders = enrichedOrders.sort((a, b) => {
+        const dateA = new Date(a.createdAt || a.updatedAt || 0);
+        const dateB = new Date(b.createdAt || b.updatedAt || 0);
+        return dateB - dateA; // Giảm dần: mới nhất trước
+      });
 
-      setOrders(enrichedOrders);
-      setFilteredOrders(enrichedOrders); // Initialize filtered orders
+      setOrders(sortedOrders);
+      setFilteredOrders(sortedOrders); // Initialize filtered orders
     } catch (err) {
       console.error("❌ Error fetching admin orders:", err);
       console.error("Error details:", err.response?.data || err.message);
@@ -146,6 +153,68 @@ const OrderManagement = ({ showToast, refreshUpdates }) => {
       count: orders.filter((order) => order.status === status.value).length,
     }));
     return stats;
+  };
+
+  // Pagination calculations
+  const totalPages = Math.ceil(filteredOrders.length / itemsPerPage);
+  const indexOfLastItem = currentPage * itemsPerPage;
+  const indexOfFirstItem = indexOfLastItem - itemsPerPage;
+  const currentOrders = filteredOrders.slice(indexOfFirstItem, indexOfLastItem);
+
+  // Pagination handlers
+  const handlePageChange = (pageNumber) => {
+    setCurrentPage(pageNumber);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  const handlePrevPage = () => {
+    if (currentPage > 1) {
+      setCurrentPage(currentPage - 1);
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+  };
+
+  const handleNextPage = () => {
+    if (currentPage < totalPages) {
+      setCurrentPage(currentPage + 1);
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+  };
+
+  // Generate page numbers to display
+  const getPageNumbers = () => {
+    const pageNumbers = [];
+    const maxPagesToShow = 5;
+
+    if (totalPages <= maxPagesToShow) {
+      for (let i = 1; i <= totalPages; i++) {
+        pageNumbers.push(i);
+      }
+    } else {
+      if (currentPage <= 3) {
+        for (let i = 1; i <= 4; i++) {
+          pageNumbers.push(i);
+        }
+        pageNumbers.push("...");
+        pageNumbers.push(totalPages);
+      } else if (currentPage >= totalPages - 2) {
+        pageNumbers.push(1);
+        pageNumbers.push("...");
+        for (let i = totalPages - 3; i <= totalPages; i++) {
+          pageNumbers.push(i);
+        }
+      } else {
+        pageNumbers.push(1);
+        pageNumbers.push("...");
+        for (let i = currentPage - 1; i <= currentPage + 1; i++) {
+          pageNumbers.push(i);
+        }
+        pageNumbers.push("...");
+        pageNumbers.push(totalPages);
+      }
+    }
+
+    return pageNumbers;
   };
 
   // Apply filters
@@ -188,13 +257,40 @@ const OrderManagement = ({ showToast, refreshUpdates }) => {
       });
     }
 
+    // Filter by date range
+    if (startDateFilter) {
+      filtered = filtered.filter((order) => {
+        const orderDate = new Date(order.createdAt);
+        const startDate = new Date(startDateFilter);
+        startDate.setHours(0, 0, 0, 0);
+        return orderDate >= startDate;
+      });
+    }
+
+    if (endDateFilter) {
+      filtered = filtered.filter((order) => {
+        const orderDate = new Date(order.createdAt);
+        const endDate = new Date(endDateFilter);
+        endDate.setHours(23, 59, 59, 999);
+        return orderDate <= endDate;
+      });
+    }
+
     setFilteredOrders(filtered);
   };
 
   // Apply filters whenever filter values change
   useEffect(() => {
     applyFilters();
-  }, [orders, orderIdFilter, statusFilter, customerNameFilter]);
+    setCurrentPage(1); // Reset về trang 1 khi filter thay đổi
+  }, [
+    orders,
+    orderIdFilter,
+    statusFilter,
+    customerNameFilter,
+    startDateFilter,
+    endDateFilter,
+  ]);
 
   useEffect(() => {
     fetchOrders();
@@ -447,7 +543,8 @@ const OrderManagement = ({ showToast, refreshUpdates }) => {
             margin: "0",
           }}
         >
-          Tổng số đơn hàng: {orders.length} | Hiển thị: {filteredOrders.length}
+          Tổng số đơn hàng: {orders.length} | Hiển thị: {filteredOrders.length}{" "}
+          | Trang {currentPage}/{totalPages}
         </p>
       </div>
 
@@ -507,11 +604,33 @@ const OrderManagement = ({ showToast, refreshUpdates }) => {
           />
         </div>
 
+        <div style={orderListStyles.filterGroup}>
+          <label style={orderListStyles.filterLabel}>Từ ngày:</label>
+          <input
+            type="date"
+            value={startDateFilter}
+            onChange={(e) => setStartDateFilter(e.target.value)}
+            style={orderListStyles.filterInput}
+          />
+        </div>
+
+        <div style={orderListStyles.filterGroup}>
+          <label style={orderListStyles.filterLabel}>Đến ngày:</label>
+          <input
+            type="date"
+            value={endDateFilter}
+            onChange={(e) => setEndDateFilter(e.target.value)}
+            style={orderListStyles.filterInput}
+          />
+        </div>
+
         <button
           onClick={() => {
             setOrderIdFilter("");
             setStatusFilter("");
             setCustomerNameFilter("");
+            setStartDateFilter("");
+            setEndDateFilter("");
           }}
           style={orderListStyles.clearButton}
         >
@@ -532,7 +651,7 @@ const OrderManagement = ({ showToast, refreshUpdates }) => {
             </tr>
           </thead>
           <tbody>
-            {orders.length === 0 ? (
+            {filteredOrders.length === 0 ? (
               <tr>
                 <td
                   colSpan="6"
@@ -547,7 +666,7 @@ const OrderManagement = ({ showToast, refreshUpdates }) => {
                 </td>
               </tr>
             ) : (
-              filteredOrders.map((order) => {
+              currentOrders.map((order) => {
                 const status = statusOptions.find(
                   (s) => s.value === order.status
                 );
@@ -635,6 +754,60 @@ const OrderManagement = ({ showToast, refreshUpdates }) => {
           </tbody>
         </table>
       </div>
+
+      {/* Pagination */}
+      {filteredOrders.length > 0 && totalPages > 1 && (
+        <div className="pagination-container">
+          <div className="pagination-info">
+            Hiển thị {indexOfFirstItem + 1}-
+            {Math.min(indexOfLastItem, filteredOrders.length)} trong số{" "}
+            {filteredOrders.length} đơn hàng
+          </div>
+
+          <div className="pagination-buttons">
+            <button
+              onClick={handlePrevPage}
+              disabled={currentPage === 1}
+              className="page-btn"
+            >
+              ← Trước
+            </button>
+
+            {getPageNumbers().map((pageNum, index) => {
+              if (pageNum === "...") {
+                return (
+                  <span
+                    key={`ellipsis-${index}`}
+                    className="page-btn page-btn-ellipsis"
+                  >
+                    ...
+                  </span>
+                );
+              }
+
+              return (
+                <button
+                  key={pageNum}
+                  onClick={() => handlePageChange(pageNum)}
+                  className={`page-btn ${
+                    currentPage === pageNum ? "active" : ""
+                  }`}
+                >
+                  {pageNum}
+                </button>
+              );
+            })}
+
+            <button
+              onClick={handleNextPage}
+              disabled={currentPage === totalPages}
+              className="page-btn"
+            >
+              Sau →
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Order Detail Modal */}
       {modalOpen && selectedOrder && (

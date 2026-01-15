@@ -6,6 +6,20 @@ const { auth, isAdmin } = require("../middleware/auth");
 
 // Admin: lấy tất cả đơn hàng
 router.get("/admin/all", auth, isAdmin, orderController.getAllOrders);
+// Admin: lấy danh sách đơn hàng trả góp
+router.get(
+  "/admin/installments",
+  auth,
+  isAdmin,
+  orderController.getInstallmentOrders
+);
+// Admin: cập nhật trạng thái trả góp
+router.put(
+  "/admin/:id/installment-status",
+  auth,
+  isAdmin,
+  orderController.updateInstallmentStatus
+);
 // Admin: xóa đơn hàng
 router.delete("/admin/:id", auth, isAdmin, orderController.deleteOrder);
 // Admin: cập nhật trạng thái đơn hàng

@@ -1,12 +1,8 @@
 import Http from "./Http";
 // Lấy toàn bộ đánh giá khách hàng
 export const getAllComments = () => {
-  const token = localStorage.getItem("accessToken");
-  return Http.get("/comments", {
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
-  });
+  // Http interceptor sẽ tự động thêm token
+  return Http.get("/comments");
 };
 
 // Lấy danh sách đơn hàng
@@ -59,6 +55,30 @@ export const updateOrderStatusAdmin = (orderId, status) => {
     }
   );
 };
+
+// Admin: lấy danh sách đơn hàng trả góp
+export const getInstallmentOrdersAdmin = (financeStatus) => {
+  const token = localStorage.getItem("accessToken");
+  const url = financeStatus
+    ? `/orders/admin/installments?financeStatus=${financeStatus}`
+    : `/orders/admin/installments`;
+  return Http.get(url, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+};
+
+// Admin: duyệt/từ chối hồ sơ trả góp
+export const updateInstallmentStatus = (orderId, financeStatus) => {
+  const token = localStorage.getItem("accessToken");
+  return Http.put(
+    `/orders/admin/${orderId}/installment-status`,
+    { financeStatus },
+    {
+      headers: { Authorization: `Bearer ${token}` },
+    }
+  );
+};
+
 // ---------------- CUSTOMERS ADMIN ----------------
 export const getCustomers = (config) => Http.get("/users", config);
 export const addCustomer = (data) => {
@@ -244,8 +264,14 @@ export const createCommentProduct = (id, data) => {
   });
 };
 
-export const deleteComment = (commentId) =>
-  Http.delete(`/comments/${commentId}`);
+export const deleteComment = (commentId) => {
+  const token = localStorage.getItem("accessToken");
+  return Http.delete(`/comments/admin/${commentId}`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+};
 
 // Reply to comment
 export const replyToComment = (commentId, replyData) => {
@@ -1282,6 +1308,14 @@ export const chatOrderTracking = (message) => {
 export const chatGetHistory = (sessionId) => {
   const token = localStorage.getItem("accessToken");
   return Http.get(`/chat/history/${sessionId}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+};
+
+// Tính toán trả góp sản phẩm
+export const calculateInstallment = (data) => {
+  const token = localStorage.getItem("accessToken");
+  return Http.post("/installment", data, {
     headers: { Authorization: `Bearer ${token}` },
   });
 };

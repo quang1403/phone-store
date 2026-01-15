@@ -1,8 +1,8 @@
-const chatService = require("../services/chatService");
-const productSearchService = require("../services/productSearchService");
+const ChatService = require("../services/ai/chat.service");
 
 /**
  * Controller xử lý các API endpoints cho chatbot
+ * Updated to use new AI architecture
  */
 
 /**
@@ -27,75 +27,184 @@ exports.askChatbot = async (req, res) => {
       sessionId ||
       `guest_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
-    // Nhận diện intent tự động từ message
-    const intent = detectIntent(message, userId);
+    // Get or create chat session
+    const ChatSession = require("../models/ChatSession");
+    let session = await ChatSession.findOne({ sessionId: finalSessionId });
 
-    let result;
-
-    switch (intent) {
-      case "order_tracking":
-        // Tra cứu đơn hàng (cần auth)
-        if (!userId) {
-          result = {
-            reply:
-              "Vui lòng đăng nhập để tra cứu đơn hàng. Bạn có thể đăng nhập tại trang chủ.",
-            sessionId: finalSessionId,
-          };
-        } else {
-          result = await chatService.handleOrderTracking(
-            userId,
-            finalSessionId,
-            message
-          );
-        }
-        break;
-
-      case "product_inquiry":
-      case "check_stock":
-        // Tư vấn sản phẩm và kiểm tra tồn kho đều dùng handleProductInquiry
-        // Service này sẽ tự động nhận diện câu hỏi về tồn kho
-        result = await chatService.handleProductInquiry(
-          userId,
-          finalSessionId,
-          message
-        );
-        break;
-
-      case "recommendations":
-        // Gợi ý sản phẩm
-        result = await chatService.handleRecommendations(
-          userId,
-          finalSessionId,
-          message
-        );
-        break;
-
-      case "compare":
-        // So sánh sản phẩm
-        result = await chatService.handleProductComparison(
-          userId,
-          finalSessionId,
-          message
-        );
-        break;
-
-      default:
-        // Hỏi đáp chung
-        result = await chatService.handleGeneralQuestion(
-          userId,
-          finalSessionId,
-          message
-        );
+    if (!session) {
+      session = await ChatSession.create({
+        sessionId: finalSessionId,
+        userId: userId,
+        context: {},
+        createdAt: new Date(),
+        lastActivity: new Date(),
+      });
     }
 
-    // Đảm bảo intent luôn được trả về
-    res.json({
-      success: true,
-      ...result,
-      intent, // Ghi đè intent từ result nếu có
-      sessionId: finalSessionId, // Đảm bảo sessionId luôn được trả về
-      timestamp: new Date(),
+    // Initialize chat service and process message
+    const startTime = Date.now();
+    const chatService = new ChatService();
+    const response = await chatService.processChat(message, session, {
+      id: userId,
     });
+    const responseTime = Date.now() - startTime;
+
+    // 💬 LƯU MESSAGES VÀO SESSION (để maintain conversation context)
+    try {
+      await session.addMessage("user", message);
+      await session.addMessage("assistant", response.message, {
+        intent: response.intent,
+        confidence: response.confidence,
+      });
+    } catch (msgError) {
+      console.error("⚠️ Lỗi khi lưu messages vào session:", msgError.message);
+    }
+
+    // 🔥 TỰ ĐỘNG LƯU VÀO CHATLOG (để training & analytics)
+    try {
+      const ChatLog = require("../models/ChatLog");
+      await ChatLog.create({
+        sessionId: finalSessionId,
+        userId: userId,
+        userMessage: message,
+        detectedIntent: response.intent || "unknown",
+        intentConfidence: response.confidence || 1.0,
+        botResponse: response.message,
+        contextData: response.data || {},
+        responseTime: responseTime,
+        usedAI: true,
+        aiModel: "gpt-4o-mini",
+        markedForTraining: response.success, // Chỉ lưu khi thành công
+        createdAt: new Date(),
+      });
+    } catch (logError) {
+      console.error("⚠️ Lỗi khi lưu ChatLog:", logError.message);
+      // Không throw error để không ảnh hưởng response
+    }
+
+    // 🔥 TỰ ĐỘNG LƯU VÀO DATASET (file-based backup)
+    try {
+      const DatasetService = require("../services/ai/dataset.service");
+      const datasetService = new DatasetService();
+
+      await datasetService.saveTrainingData({
+        sessionId: finalSessionId,
+        userMessage: message,
+        detectedIntent: response.intent || "unknown",
+        botResponse: response.message,
+        wasHelpful: null, // Sẽ update sau khi có feedback
+        timestamp: new Date(),
+      });
+
+      // Nếu có sản phẩm được gợi ý, lưu suggestion
+      if (response.data?.products && response.data.products.length > 0) {
+        await datasetService.saveSuggestion({
+          sessionId: finalSessionId,
+          userMessage: message,
+          suggestedProducts: response.data.products,
+          userSelected: null, // Sẽ update khi user chọn
+          timestamp: new Date(),
+        });
+      }
+    } catch (datasetError) {
+      console.error("⚠️ Lỗi khi lưu Dataset:", datasetError.message);
+      // Không throw error để không ảnh hưởng response
+    }
+
+    // Return the response from the new AI architecture
+    // Format để match FE expectations
+    const finalResponse = {
+      success: response.success,
+      reply: response.message,
+      intent: response.intent,
+      sessionId: finalSessionId,
+      timestamp: new Date(),
+      responseTime: responseTime,
+    };
+
+    // Nếu có products, format cho FE
+    if (response.data?.products && response.data.products.length > 0) {
+      // FE expect 'product' (singular) với first product
+      const firstProduct = response.data.products[0];
+
+      console.log(
+        `🎁 Preparing product for actions: ${firstProduct.name} (ID: ${firstProduct._id})`
+      );
+
+      // Tính giá sau giảm cho product
+      const originalPrice = firstProduct.price;
+      const discount = firstProduct.discount || 0;
+      const finalPrice =
+        discount > 0
+          ? Math.round(originalPrice * (1 - discount / 100))
+          : originalPrice;
+
+      // Add calculated fields to product
+      finalResponse.product = {
+        ...firstProduct,
+        originalPrice: originalPrice,
+        finalPrice: finalPrice,
+        discountAmount: discount > 0 ? originalPrice - finalPrice : 0,
+      };
+
+      // Thêm colorVariants vào response data nếu có
+      if (firstProduct.colorVariants && firstProduct.colorVariants.length > 0) {
+        finalResponse.colorVariants = firstProduct.colorVariants;
+        console.log(
+          `✅ Trả về ${firstProduct.colorVariants.length} colorVariants cho FE`
+        );
+      } else if (firstProduct.color && firstProduct.color.length > 0) {
+        // Fallback về color legacy
+        finalResponse.colors = firstProduct.color;
+        console.log(
+          `⚠️ Fallback về color legacy: ${firstProduct.color.join(", ")}`
+        );
+      }
+
+      // Thêm actions cho product
+      finalResponse.actions = [
+        { type: "add_to_cart", label: "Thêm vào giỏ" },
+        { type: "buy_now", label: "Mua ngay" },
+        { type: "installment", label: "Trả góp" },
+      ];
+
+      // Giữ lại full products list với giá sau giảm
+      finalResponse.products = response.data.products.map((p) => {
+        const pOriginalPrice = p.price;
+        const pDiscount = p.discount || 0;
+        const pFinalPrice =
+          pDiscount > 0
+            ? Math.round(pOriginalPrice * (1 - pDiscount / 100))
+            : pOriginalPrice;
+
+        return {
+          ...p,
+          originalPrice: pOriginalPrice,
+          finalPrice: pFinalPrice,
+          discountAmount: pDiscount > 0 ? pOriginalPrice - pFinalPrice : 0,
+        };
+      });
+    } else {
+      console.log(
+        `⚠️ No products in response for intent: ${
+          response.intent
+        }, message: "${message.substring(0, 50)}..."`
+      );
+    }
+
+    // Spread remaining data
+    if (response.data) {
+      const { products, ...otherData } = response.data;
+      Object.assign(finalResponse, otherData);
+    }
+
+    console.log(
+      `📤 Final response: intent=${
+        finalResponse.intent
+      }, hasProduct=${!!finalResponse.product}, hasActions=${!!finalResponse.actions}`
+    );
+
+    res.json(finalResponse);
   } catch (error) {
     console.error("Error in askChatbot:", error);
     res.status(500).json({
@@ -107,90 +216,8 @@ exports.askChatbot = async (req, res) => {
 };
 
 /**
- * Hàm nhận diện intent từ message
- */
-function detectIntent(message, userId) {
-  const lowerMsg = message.toLowerCase();
-
-  // Tra cứu đơn hàng
-  if (
-    lowerMsg.includes("đơn hàng") ||
-    lowerMsg.includes("order") ||
-    lowerMsg.includes("tra cứu") ||
-    lowerMsg.includes("tracking") ||
-    lowerMsg.includes("theo dõi") ||
-    lowerMsg.includes("kiểm tra đơn")
-  ) {
-    return "order_tracking";
-  }
-
-  // So sánh sản phẩm
-  if (
-    lowerMsg.includes("so sánh") ||
-    lowerMsg.includes("khác nhau") ||
-    lowerMsg.includes("compare") ||
-    lowerMsg.includes("giống") ||
-    lowerMsg.includes("vs") ||
-    lowerMsg.includes("và")
-  ) {
-    return "compare";
-  }
-
-  // Kiểm tra tồn kho
-  if (
-    lowerMsg.includes("tồn kho") ||
-    lowerMsg.includes("còn hàng") ||
-    lowerMsg.includes("stock") ||
-    lowerMsg.includes("available") ||
-    lowerMsg.includes("sẵn hàng")
-  ) {
-    return "check_stock";
-  }
-
-  // Gợi ý sản phẩm
-  if (
-    lowerMsg.includes("gợi ý") ||
-    lowerMsg.includes("recommend") ||
-    lowerMsg.includes("nên mua") ||
-    lowerMsg.includes("phù hợp") ||
-    lowerMsg.includes("tư vấn mua") ||
-    lowerMsg.includes("chọn")
-  ) {
-    return "recommendations";
-  }
-
-  // Tư vấn sản phẩm (hỏi về sản phẩm cụ thể)
-  if (
-    lowerMsg.includes("sản phẩm") ||
-    lowerMsg.includes("điện thoại") ||
-    lowerMsg.includes("phone") ||
-    lowerMsg.includes("iphone") ||
-    lowerMsg.includes("samsung") ||
-    lowerMsg.includes("xiaomi") ||
-    lowerMsg.includes("oppo") ||
-    lowerMsg.includes("vivo") ||
-    lowerMsg.includes("realme") ||
-    lowerMsg.includes("nokia") ||
-    lowerMsg.includes("giá") ||
-    lowerMsg.includes("price") ||
-    lowerMsg.includes("thông số") ||
-    lowerMsg.includes("specs") ||
-    lowerMsg.includes("cấu hình") ||
-    lowerMsg.includes("màu") ||
-    lowerMsg.includes("color") ||
-    lowerMsg.includes("phiên bản") ||
-    lowerMsg.includes("variant")
-  ) {
-    return "product_inquiry";
-  }
-
-  // Mặc định: hỏi đáp chung
-  return "general";
-}
-
-/**
  * POST /api/chat/product-inquiry
- * Tư vấn sản phẩm với RAG (truy xuất dữ liệu thực)
+ * Legacy endpoint - forwards to new architecture
  */
 exports.productInquiry = async (req, res) => {
   try {
@@ -208,83 +235,51 @@ exports.productInquiry = async (req, res) => {
       sessionId ||
       `guest_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
-    const result = await chatService.handleProductInquiry(
-      userId,
-      finalSessionId,
-      message
-    );
+    // Get or create chat session
+    const ChatSession = require("../models/ChatSession");
+    let session = await ChatSession.findOne({ sessionId: finalSessionId });
+
+    if (!session) {
+      session = await ChatSession.create({
+        sessionId: finalSessionId,
+        userId: userId,
+        context: {},
+        createdAt: new Date(),
+        lastActivity: new Date(),
+      });
+    }
+
+    // Initialize chat service and process message
+    const chatService = new ChatService();
+    const response = await chatService.processChat(message, session, {
+      id: userId,
+    });
 
     res.json({
       success: true,
-      ...result,
+      reply: response.message,
+      intent: response.intent,
+      sessionId: finalSessionId,
       timestamp: new Date(),
+      ...response.data,
     });
   } catch (error) {
     console.error("Error in productInquiry:", error);
     res.status(500).json({
       success: false,
-      error: "Lỗi khi tư vấn sản phẩm",
+      error: "Lỗi khi xử lý tư vấn sản phẩm",
       details: error.message,
     });
   }
 };
 
 /**
- * POST /api/chat/order-tracking
- * Tra cứu đơn hàng
- * Body: { message, sessionId, orderId (optional) }
+ * POST /api/chat/installment-advice
+ * Legacy endpoint - forwards to new architecture
  */
-exports.orderTracking = async (req, res) => {
+exports.installmentAdvice = async (req, res) => {
   try {
-    const { message, sessionId, orderId } = req.body;
-    const userId = req.user?.id;
-
-    if (!message) {
-      return res.status(400).json({
-        success: false,
-        error: "Thiếu nội dung tin nhắn",
-      });
-    }
-
-    if (!userId && !orderId) {
-      return res.status(401).json({
-        success: false,
-        error: "Vui lòng đăng nhập hoặc cung cấp mã đơn hàng",
-      });
-    }
-
-    const finalSessionId = sessionId || `user_${userId}_${Date.now()}`;
-
-    const result = await chatService.handleOrderTracking(
-      userId,
-      finalSessionId,
-      message,
-      orderId
-    );
-
-    res.json({
-      success: true,
-      ...result,
-      timestamp: new Date(),
-    });
-  } catch (error) {
-    console.error("Error in orderTracking:", error);
-    res.status(500).json({
-      success: false,
-      error: "Lỗi khi tra cứu đơn hàng",
-      details: error.message,
-    });
-  }
-};
-
-/**
- * POST /api/chat/recommendations
- * Gợi ý sản phẩm
- * Body: { message, sessionId, productId (optional - để gợi ý sản phẩm tương tự) }
- */
-exports.recommendations = async (req, res) => {
-  try {
-    const { message, sessionId, productId } = req.body;
+    const { message, sessionId } = req.body;
     const userId = req.user?.id || null;
 
     if (!message) {
@@ -298,180 +293,109 @@ exports.recommendations = async (req, res) => {
       sessionId ||
       `guest_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
-    const result = await chatService.handleRecommendations(
-      userId,
-      finalSessionId,
-      message,
-      productId
-    );
+    // Get or create chat session
+    const ChatSession = require("../models/ChatSession");
+    let session = await ChatSession.findOne({ sessionId: finalSessionId });
 
-    res.json({
-      success: true,
-      ...result,
-      timestamp: new Date(),
-    });
-  } catch (error) {
-    console.error("Error in recommendations:", error);
-    res.status(500).json({
-      success: false,
-      error: "Lỗi khi gợi ý sản phẩm",
-      details: error.message,
-    });
-  }
-};
-
-/**
- * POST /api/chat/compare
- * So sánh sản phẩm
- * Body: { message, sessionId, productIds: [id1, id2] }
- */
-exports.compareProducts = async (req, res) => {
-  try {
-    const { message, sessionId, productIds } = req.body;
-    const userId = req.user?.id || null;
-
-    if (!message || !productIds || productIds.length < 2) {
-      return res.status(400).json({
-        success: false,
-        error: "Thiếu thông tin hoặc cần ít nhất 2 sản phẩm để so sánh",
+    if (!session) {
+      session = await ChatSession.create({
+        sessionId: finalSessionId,
+        userId: userId,
+        context: {},
+        createdAt: new Date(),
+        lastActivity: new Date(),
       });
     }
 
-    const finalSessionId =
-      sessionId ||
-      `guest_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-
-    const result = await chatService.handleProductComparison(
-      userId,
-      finalSessionId,
-      message,
-      productIds
-    );
+    // Initialize chat service and process message
+    const chatService = new ChatService();
+    const response = await chatService.processChat(message, session, {
+      id: userId,
+    });
 
     res.json({
       success: true,
-      ...result,
+      reply: response.message,
+      intent: response.intent,
+      sessionId: finalSessionId,
       timestamp: new Date(),
+      ...response.data,
     });
   } catch (error) {
-    console.error("Error in compareProducts:", error);
+    console.error("Error in installmentAdvice:", error);
     res.status(500).json({
       success: false,
-      error: "Lỗi khi so sánh sản phẩm",
+      error: "Lỗi khi xử lý tư vấn trả góp",
       details: error.message,
     });
   }
 };
 
 /**
- * GET /api/chat/history/:sessionId
- * Lấy lịch sử hội thoại
+ * GET /api/chat/session/:sessionId
+ * Lấy thông tin session chat
  */
-exports.getChatHistory = async (req, res) => {
+exports.getChatSession = async (req, res) => {
   try {
     const { sessionId } = req.params;
+    const ChatSession = require("../models/ChatSession");
 
-    if (!sessionId) {
-      return res.status(400).json({
-        success: false,
-        error: "Thiếu sessionId",
-      });
-    }
+    const session = await ChatSession.findOne({ sessionId });
 
-    const result = await chatService.getChatHistory(sessionId);
-
-    res.json({
-      success: true,
-      ...result,
-      timestamp: new Date(),
-    });
-  } catch (error) {
-    console.error("Error in getChatHistory:", error);
-    res.status(500).json({
-      success: false,
-      error: "Lỗi khi lấy lịch sử chat",
-      details: error.message,
-    });
-  }
-};
-
-/**
- * POST /api/chat/check-stock
- * Kiểm tra tồn kho sản phẩm
- * Body: { productId, variant (optional) }
- */
-exports.checkStock = async (req, res) => {
-  try {
-    let { productId, variant, sessionId } = req.body;
-
-    // Nếu không có productId, thử lấy từ context hội thoại
-    if (!productId && sessionId) {
-      const ChatSession = require("../models/ChatSession");
-      const session = await ChatSession.findOne({ sessionId });
-      if (session && session.context && session.context.currentProduct) {
-        productId = session.context.currentProduct;
-      }
-    }
-
-    if (!productId) {
-      return res.status(400).json({
-        success: false,
-        error:
-          "Thiếu productId hoặc không xác định được sản phẩm từ ngữ cảnh hội thoại",
-      });
-    }
-
-    const result = await productSearchService.checkStock(productId, variant);
-
-    res.json({
-      success: true,
-      ...result,
-      timestamp: new Date(),
-    });
-  } catch (error) {
-    console.error("Error in checkStock:", error);
-    res.status(500).json({
-      success: false,
-      error: "Lỗi khi kiểm tra tồn kho",
-      details: error.message,
-    });
-  }
-};
-
-/**
- * GET /api/chat/product-details/:productId
- * Lấy chi tiết sản phẩm
- */
-exports.getProductDetails = async (req, res) => {
-  try {
-    const { productId } = req.params;
-
-    if (!productId) {
-      return res.status(400).json({
-        success: false,
-        error: "Thiếu productId",
-      });
-    }
-
-    const product = await productSearchService.getProductDetails(productId);
-
-    if (!product) {
+    if (!session) {
       return res.status(404).json({
         success: false,
-        error: "Không tìm thấy sản phẩm",
+        error: "Không tìm thấy session",
       });
     }
 
     res.json({
       success: true,
-      product,
-      timestamp: new Date(),
+      session: {
+        sessionId: session.sessionId,
+        userId: session.userId,
+        context: session.context,
+        createdAt: session.createdAt,
+        lastActivity: session.lastActivity,
+      },
     });
   } catch (error) {
-    console.error("Error in getProductDetails:", error);
+    console.error("Error in getChatSession:", error);
     res.status(500).json({
       success: false,
-      error: "Lỗi khi lấy chi tiết sản phẩm",
+      error: "Lỗi khi lấy thông tin session",
+      details: error.message,
+    });
+  }
+};
+
+/**
+ * DELETE /api/chat/session/:sessionId
+ * Xóa session chat
+ */
+exports.deleteChatSession = async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    const ChatSession = require("../models/ChatSession");
+
+    const result = await ChatSession.deleteOne({ sessionId });
+
+    if (result.deletedCount === 0) {
+      return res.status(404).json({
+        success: false,
+        error: "Không tìm thấy session để xóa",
+      });
+    }
+
+    res.json({
+      success: true,
+      message: "Đã xóa session thành công",
+    });
+  } catch (error) {
+    console.error("Error in deleteChatSession:", error);
+    res.status(500).json({
+      success: false,
+      error: "Lỗi khi xóa session",
       details: error.message,
     });
   }
